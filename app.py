@@ -3,6 +3,7 @@ import pandas as pd
 from datetime import datetime
 import os
 
+# Rutas de archivos
 RUTA_ARCHIVO = "registros.csv"
 RUTA_PERSONAS = "personas.csv"
 
@@ -12,43 +13,42 @@ RUTA_PERSONAS = "personas.csv"
 # ==============================
 
 def cargar_personas():
-    """Lee la lista de personas autorizadas desde personas.csv"""
+    """Lee la lista de personas autorizadas desde personas.csv."""
     if os.path.exists(RUTA_PERSONAS):
+        # Leemos asumiendo separador ; (como está tu CSV actual)
         df = pd.read_csv(
             RUTA_PERSONAS,
-            sep=None,
+            sep=";",
             engine="python"
         )
 
         # Normalizamos columnas esperadas
+        if "nombre" not in df.columns:
+            df["nombre"] = ""
+
         if "activo" in df.columns:
             df["activo"] = df["activo"].fillna(0).astype(int)
         else:
             df["activo"] = 1
 
-        if "pin" not in df.columns:
-            df["pin"] = ""
-
-        if "nombre" not in df.columns:
-            df["nombre"] = ""
-
         df["nombre"] = df["nombre"].astype(str).str.strip()
-        df["pin"] = df["pin"].astype(str).str.strip()
 
-        # Filtramos solo activos
+        # Solo personas activas
         df = df[df["activo"] == 1]
 
         return df
     else:
-        return pd.DataFrame(columns=["nombre", "pin", "activo"])
+        # Si no hay archivo, devolvemos DF vacío
+        return pd.DataFrame(columns=["nombre", "activo"])
 
 
 def cargar_datos():
     """Lee el archivo de registros, si existe."""
     if os.path.exists(RUTA_ARCHIVO):
         try:
-            return pd.read_csv(RUTA_ARCHIVO, sep=None, engine="python")
+            return pd.read_csv(RUTA_ARCHIVO, sep=";", engine="python")
         except Exception:
+            # Si hay problema leyendo, devolvemos DF vacío con columnas correctas
             return pd.DataFrame(columns=[
                 "timestamp", "fecha", "hora",
                 "nombre", "punto"
@@ -79,29 +79,8 @@ def guardar_registro(nombre, punto):
 
     df = pd.concat([df, nuevo], ignore_index=True)
 
+    # Guardamos con separador ; para que Excel lo abra en columnas
     df.to_csv(RUTA_ARCHIVO, index=False, sep=";")
-
-
-def validar_credenciales(nombre, pin):
-    """
-    Devuelve True si nombre + pin son válidos; si no, False.
-    """
-    personas = cargar_personas()
-    if personas.empty:
-        return False
-
-    nombre = str(nombre).strip()
-    pin = str(pin).strip()
-
-    personas["nombre"] = personas["nombre"].astype(str).str.strip()
-    personas["pin"] = personas["pin"].astype(str).str.strip()
-
-    fila = personas[
-        (personas["nombre"] == nombre) &
-        (personas["pin"] == pin)
-    ]
-
-    return not fila.empty
 
 
 # ==============================
@@ -109,6 +88,7 @@ def validar_credenciales(nombre, pin):
 # ==============================
 
 def vista_registro():
+    # Obtenemos el punto desde la URL ?punto=...
     params = st.query_params
     punto = params.get("punto", "SIN_PUNTO")
     if isinstance(punto, list):
@@ -120,8 +100,8 @@ def vista_registro():
     st.markdown(
         """
         <p style="color: #bbb; font-size: 14px;">
-        Selecciona tu nombre de la lista e ingresa tu <b>PIN</b> personal.
-        El sistema validará tus credenciales y registrará tu presencia.
+        Selecciona tu nombre de la lista y presiona <b>Registrar presencia</b>.
+        El sistema registrará tu nombre, el punto de control, la fecha y la hora.
         </p>
         """,
         unsafe_allow_html=True
@@ -136,31 +116,16 @@ def vista_registro():
 
     nombre_sel = st.selectbox("Selecciona tu nombre", ["-- Selecciona --"] + nombres)
 
-    pin = st.text_input("PIN", type="password", max_chars=10)
-
-    credenciales_ok = False
-    if nombre_sel != "-- Selecciona --" and pin.strip() != "":
-        credenciales_ok = validar_credenciales(nombre_sel, pin)
-        if credenciales_ok:
-            st.success(f"Credenciales válidas. Usuario: {nombre_sel}")
-        else:
-            st.error("❌ Nombre o PIN incorrectos.")
-
     if st.button("Registrar presencia", use_container_width=True):
         if nombre_sel == "-- Selecciona --":
             st.error("Por favor selecciona tu nombre.")
-        elif pin.strip() == "":
-            st.error("Por favor ingresa tu PIN.")
         else:
-            if validar_credenciales(nombre_sel, pin):
-                guardar_registro(
-                    nombre=nombre_sel,
-                    punto=punto,
-                )
-                st.success(f"✅ Registro exitoso. Hola, {nombre_sel}.")
-                st.info("Puedes cerrar esta ventana.")
-            else:
-                st.error("❌ Nombre o PIN incorrectos. No se puede registrar.")
+            guardar_registro(
+                nombre=nombre_sel,
+                punto=punto,
+            )
+            st.success(f"✅ Registro exitoso. Hola, {nombre_sel}.")
+            st.info("Puedes cerrar esta ventana.")
 
 
 def vista_panel():
@@ -172,6 +137,7 @@ def vista_panel():
         st.info("Aún no hay registros. Cuando empiecen a escanear los QR, verás la información aquí.")
         return
 
+    # Métricas principales
     col1, col2, col3 = st.columns(3)
     with col1:
         st.metric("Total de registros", len(df))
@@ -182,6 +148,7 @@ def vista_panel():
 
     st.markdown("---")
 
+    # Filtros
     puntos = ["Todos"] + sorted(df["punto"].dropna().unique().tolist())
     punto_sel = st.selectbox("Filtrar por punto", puntos)
 
