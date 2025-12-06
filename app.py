@@ -1,3 +1,5 @@
+from datetime import datetime
+from zoneinfo import ZoneInfo   # <--- IMPORTANTE
 import streamlit as st
 import pandas as pd
 from datetime import datetime
@@ -194,4 +196,5 @@ def main():
 
 if __name__ == "__main__":
     main()
+
 
