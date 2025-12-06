@@ -61,10 +61,10 @@ def cargar_datos():
 
 
 def guardar_registro(nombre, punto):
-    """Agrega un registro nuevo al archivo registros.csv."""
     df = cargar_datos()
 
-    ahora = datetime.now()
+    # Hora de Perú (America/Lima)
+    ahora = datetime.now(ZoneInfo("America/Lima"))
     fecha = ahora.strftime("%Y-%m-%d")
     hora = ahora.strftime("%H:%M:%S")
     timestamp = ahora.strftime("%Y-%m-%d %H:%M:%S")
@@ -194,3 +194,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+
