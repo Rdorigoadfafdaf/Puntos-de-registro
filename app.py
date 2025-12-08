@@ -5,7 +5,7 @@ from datetime import datetime
 import pandas as pd
 import pytz
 import streamlit as st
-from PIL import Image, ImageDraw
+from PIL import Image, ImageDraw, ImageFilter
 import gspread
 from google.oauth2.service_account import Credentials
 
@@ -14,6 +14,7 @@ from google.oauth2.service_account import Credentials
 # -------------------------
 RUTA_ARCHIVO = "registros.csv"
 RUTA_PERSONAS = "personas.csv"
+
 
 # -------------------------
 # Utilidades de normalización
@@ -30,73 +31,28 @@ def normalizar(texto: str) -> str:
     )
     return t
 
-# Imagen de la planta para el mapa de calor (RGBA para transparencia)
+
+# Imagen de la planta para el mapa de calor (RGBA para transparencias)
 imagen_planta = Image.open("planta.png").convert("RGBA")
 
-# Puntos de la planta: coordenadas + color (RGBA), claves normalizadas
-PUNTOS = {
-    # esquina inferior izquierda hacia la derecha, según tu imagen marcada
-    normalizar("Ventanas"): {
-        "coord": (195, 608),
-        "color": (0, 255, 0, 180),        # verde
-    },
-    normalizar("Faja 2"): {
-        "coord": (252, 587),
-        "color": (255, 105, 180, 180),    # rosado
-    },
-    normalizar("Chancado Primario"): {
-        "coord": (330, 560),
-        "color": (160, 32, 240, 180),     # morado
-    },
-    normalizar("Chancado Secundario"): {
-        "coord": (388, 533),
-        "color": (0, 191, 255, 180),      # celeste
-    },
-    normalizar("Cuarto Control"): {
-        "coord": (650, 760),
-        "color": (255, 255, 255, 200),    # blanco
-    },
-    normalizar("Filtro Zn"): {
-        "coord": (455, 409),
-        "color": (255, 255, 0, 180),      # amarillo
-    },
-    normalizar("Flotacion Zn"): {
-        "coord": (623, 501),
-        "color": (255, 165, 0, 180),      # naranja
-    },
-    normalizar("Flotacion Pb"): {
-        "coord": (691, 423),
-        "color": (255, 0, 0, 180),        # rojo
-    },
-    normalizar("Tripper"): {
-        "coord": (766, 452),
-        "color": (0, 128, 0, 180),        # verde más oscuro
-    },
-    normalizar("Molienda"): {
-        "coord": (802, 480),
-        "color": (30, 144, 255, 180),     # azul
-    },
-    normalizar("Nido de Ciclones 4"): {
-        "coord": (811, 307),
-        "color": (0, 0, 0, 200),          # negro
-    },
+# Coordenadas aproximadas (en píxeles) de cada punto sobre la imagen
+# Claves ya normalizadas para facilitar el match con los registros
+PUNTOS_COORDS = {
+    normalizar("Ventanas"): (195, 608),
+    normalizar("Faja 2"): (252, 587),
+    normalizar("Chancado Primario"): (330, 560),
+    normalizar("Chancado Secundario"): (388, 533),
+    normalizar("Cuarto Control"): (650, 760),
+    normalizar("Filtro Zn"): (455, 409),
+    normalizar("Flotacion Zn"): (623, 501),
+    normalizar("Flotación Zn"): (623, 501),   # por si viene con tilde
+    normalizar("Flotacion Pb"): (691, 423),
+    normalizar("Flotación Pb"): (691, 423),
+    normalizar("Tripper"): (766, 452),
+    normalizar("Molienda"): (802, 480),
+    normalizar("Nido de Ciclones 4"): (811, 307),
 }
 
-def obtener_meta_punto(p_norm: str):
-    """
-    Devuelve un dict con coord y color para un punto normalizado.
-    Usa coincidencia exacta o parcial (contiene).
-    """
-    # 1) Coincidencia exacta
-    if p_norm in PUNTOS:
-        return PUNTOS[p_norm]
-
-    # 2) Coincidencia flexible, por si el texto viene con algo más
-    for key, meta in PUNTOS.items():
-        if key in p_norm or p_norm in key:
-            return meta
-
-    return None
 
 # -------------------------
 # Google Sheets
@@ -119,6 +75,7 @@ def get_worksheet():
 
     sh = client.open_by_key(sheet_id)
     return sh.sheet1  # primera hoja
+
 
 # -------------------------
 # Funciones de datos
@@ -194,15 +151,45 @@ def guardar_registro(nombre, punto):
         # No rompemos la app si falla Sheets; solo mostramos aviso
         st.write("⚠ No se pudo guardar en Google Sheets:", e)
 
+
 # -------------------------
-# Mapa de calor
+# Mapa de calor (escala térmica)
 # -------------------------
 
+def color_heat(value: float) -> tuple:
+    """
+    Devuelve un color RGBA según el valor normalizado 0-1.
+    0   → azul
+    0.33→ verde
+    0.66→ amarillo
+    1   → rojo
+    """
+    v = max(0.0, min(1.0, value))
+
+    if v < 1/3:  # azul → verde
+        t = v / (1/3)
+        r = 0
+        g = int(255 * t)
+        b = int(255 * (1 - t))
+    elif v < 2/3:  # verde → amarillo
+        t = (v - 1/3) / (1/3)
+        r = int(255 * t)
+        g = 255
+        b = 0
+    else:  # amarillo → rojo
+        t = (v - 2/3) / (1/3)
+        r = 255
+        g = int(255 * (1 - t))
+        b = 0
+
+    return (r, g, b, 180)  # alpha 180 para transparencia
+
+
 def generar_heatmap(df, selected_person=None):
-    """Dibuja el mapa con los colores de cada punto sobre planta.png."""
-    base = imagen_planta.copy()
-    overlay = Image.new("RGBA", base.size, (0, 0, 0, 0))
-    draw = ImageDraw.Draw(overlay)
+    """Dibuja un mapa de calor difuminado sobre planta.png."""
+    base = imagen_planta.copy()          # fondo satelital
+    heat = Image.new("RGBA", base.size, (0, 0, 0, 0))  # capa de calor transparente
+    draw = ImageDraw.Draw(heat)
 
     # Filtrar por persona si se seleccionó una
     if selected_person and selected_person != "Todos":
@@ -217,28 +204,37 @@ def generar_heatmap(df, selected_person=None):
 
     # Contar registros por punto normalizado
     counts = df["punto_norm"].value_counts()
+    max_count = counts.max()
 
     for p_norm, n in counts.items():
-        meta = obtener_meta_punto(p_norm)
-        if meta is None:
+        if p_norm not in PUNTOS_COORDS:
             continue
 
-        x, y = meta["coord"]
-        color = meta["color"]  # RGBA
+        x, y = PUNTOS_COORDS[p_norm]
 
-        # Radio proporcional a cantidad de registros
-        r = min(70, 18 + n * 6)
+        # Intensidad 0-1
+        intensity = n / max_count if max_count > 0 else 0.0
 
-        # Círculo semi-transparente sobre overlay
+        # Color según intensidad
+        color = color_heat(intensity)
+
+        # Radio proporcional a intensidad
+        r = int(25 + 45 * intensity)  # mínimo 25, máximo ~70
+
+        # Dibujamos un círculo "caliente" en la capa de calor
         draw.ellipse(
             (x - r, y - r, x + r, y + r),
             fill=color,
-            outline=(255, 255, 255, 220),  # borde blanco para resaltar
-            width=2,
+            outline=None,
         )
 
-    combinado = Image.alpha_composite(base, overlay)
+    # Difuminamos la capa de calor para que se vea más suave
+    heat_blur = heat.filter(ImageFilter.GaussianBlur(radius=35))
+
+    # Combinamos el fondo con el heatmap
+    combinado = Image.alpha_composite(base, heat_blur)
     return combinado.convert("RGB")
+
 
 # -------------------------
 # Vistas
@@ -291,12 +287,9 @@ def vista_panel():
         st.info("Aún no hay registros...")
         return
 
-    # (Opcional) Debug para ver qué puntos hay realmente
-    # st.write("Puntos detectados en registros:", df["punto"].unique())
-
     # ---- Mapa de calor ----
     st.markdown("---")
-    st.subheader("Mapa de colores por punto en la planta")
+    st.subheader("Mapa de calor en la planta")
 
     personas = ["Todos"] + sorted(df["nombre"].dropna().unique().tolist())
     persona_sel = st.selectbox(
@@ -306,7 +299,7 @@ def vista_panel():
     )
 
     mapa_img = generar_heatmap(df, persona_sel)
-    st.image(mapa_img, use_container_width=True)
+    st.image(mapa_img, use_column_width=True)
 
     # ---- Métricas principales ----
     st.markdown("---")
@@ -345,6 +338,7 @@ def vista_panel():
         use_container_width=True,
     )
 
+
 # -------------------------
 # Main
 # -------------------------
@@ -368,5 +362,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-
-
