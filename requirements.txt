@@ -1,3 +1,7 @@
 streamlit
 pandas
 qrcode[pil]
+gspread
+google-auth
+pytz
+
