@@ -4,4 +4,5 @@ qrcode[pil]
 gspread
 google-auth
 pytz
+pillow
 
