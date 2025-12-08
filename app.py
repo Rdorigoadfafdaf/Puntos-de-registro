@@ -359,7 +359,7 @@ def vista_panel():
     if punto_sel != "Todos":
         df_filtrado = df_filtrado[df_filtrado["punto"] == punto_sel]
 
-    st.subheader("Registros detallados")
+        st.subheader("Registros detallados")
     st.dataframe(
         df_filtrado.sort_values("timestamp", ascending=False),
         use_column_width=True,
@@ -401,3 +401,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+
