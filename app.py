@@ -1,4 +1,5 @@
 import os
+import unicodedata
 from datetime import datetime
 
 import pandas as pd
@@ -14,23 +15,37 @@ from google.oauth2.service_account import Credentials
 RUTA_ARCHIVO = "registros.csv"
 RUTA_PERSONAS = "personas.csv"
 
-# Imagen de la planta para el mapa de calor
-imagen_planta = Image.open("planta.png")
+# -------------------------
+# Utilidades de normalización
+# -------------------------
 
-# Coordenadas aproximadas de cada punto sobre la imagen
-# (si algún punto se ve corrido, luego ajustamos X, Y)
+def normalizar(texto: str) -> str:
+    """Convierte texto a minúsculas, sin tildes ni espacios extra."""
+    if texto is None:
+        return ""
+    t = str(texto).strip().lower()
+    t = "".join(
+        c for c in unicodedata.normalize("NFD", t)
+        if unicodedata.category(c) != "Mn"
+    )
+    return t
+
+# Imagen de la planta para el mapa de calor (RGBA para transparencia)
+imagen_planta = Image.open("planta.png").convert("RGBA")
+
+# Coordenadas aproximadas de cada punto sobre la imagen (claves normalizadas)
 PUNTOS_COORDS = {
-    "Ventanas": (195, 608),
-    "Faja 2": (252, 587),
-    "Chancado Primario": (330, 560),
-    "Chancado Secundario": (388, 533),
-    "Cuarto Control": (650, 760),
-    "Filtro Zn": (455, 409),
-    "Flotación Zn": (623, 501),
-    "Flotación Pb": (691, 423),
-    "Tripper": (766, 452),
-    "Molienda": (802, 480),
-    "Nido de Ciclones 4": (811, 307),
+    normalizar("Ventanas"): (195, 608),
+    normalizar("Faja 2"): (252, 587),
+    normalizar("Chancado Primario"): (330, 560),
+    normalizar("Chancado Secundario"): (388, 533),
+    normalizar("Cuarto Control"): (650, 760),
+    normalizar("Filtro Zn"): (455, 409),
+    normalizar("Flotacion Zn"): (623, 501),
+    normalizar("Flotacion Pb"): (691, 423),
+    normalizar("Tripper"): (766, 452),
+    normalizar("Molienda"): (802, 480),
+    normalizar("Nido de Ciclones 4"): (811, 307),
 }
 
 # -------------------------
@@ -54,7 +69,6 @@ def get_worksheet():
 
     sh = client.open_by_key(sheet_id)
     return sh.sheet1  # primera hoja
-
 
 # -------------------------
 # Funciones de datos
@@ -130,44 +144,48 @@ def guardar_registro(nombre, punto):
         # No rompemos la app si falla Sheets; solo mostramos aviso
         st.write("⚠ No se pudo guardar en Google Sheets:", e)
 
-
 # -------------------------
 # Mapa de calor
 # -------------------------
 
 def generar_heatmap(df, selected_person=None):
     """Dibuja el mapa de calor sobre planta.png usando los registros."""
-    img = imagen_planta.copy()
-    draw = ImageDraw.Draw(img)
+    base = imagen_planta.copy()
+    overlay = Image.new("RGBA", base.size, (0, 0, 0, 0))
+    draw = ImageDraw.Draw(overlay)
 
     # Filtrar por persona si se seleccionó una
     if selected_person and selected_person != "Todos":
         df = df[df["nombre"] == selected_person]
 
     if df.empty:
-        return img
+        return base.convert("RGB")
 
-    # Contar registros por punto
-    counts = df["punto"].value_counts()
+    # Normalizar nombres de punto
+    df = df.copy()
+    df["punto_norm"] = df["punto"].apply(normalizar)
 
-    for punto, n in counts.items():
-        if punto not in PUNTOS_COORDS:
+    # Contar registros por punto normalizado
+    counts = df["punto_norm"].value_counts()
+
+    for p_norm, n in counts.items():
+        if p_norm not in PUNTOS_COORDS:
             continue
 
-        x, y = PUNTOS_COORDS[punto]
+        x, y = PUNTOS_COORDS[p_norm]
         # Radio proporcional a cantidad de registros (ajustable)
-        r = min(60, 15 + n * 5)
+        r = min(70, 18 + n * 6)
 
-        # Círculo rojo semi-transparente
+        # Círculo rojo semi-transparente sobre overlay
         draw.ellipse(
             (x - r, y - r, x + r, y + r),
-            fill=(255, 0, 0, 120),
-            outline=(255, 255, 255, 200),
+            fill=(255, 0, 0, 120),          # rojo con transparencia
+            outline=(255, 255, 255, 200),  # borde blanco
             width=2,
         )
 
-    return img
-
+    combinado = Image.alpha_composite(base, overlay)
+    return combinado.convert("RGB")
 
 # -------------------------
 # Vistas
@@ -220,30 +238,19 @@ def vista_panel():
         st.info("Aún no hay registros...")
         return
 
+    # (Opcional) ver qué puntos existen realmente en los registros
+    # st.write("Puntos detectados en registros:", df["punto"].unique())
+
     # ---- Mapa de calor ----
     st.markdown("---")
     st.subheader("Mapa de calor en la planta")
 
     personas = ["Todos"] + sorted(df["nombre"].dropna().unique().tolist())
     persona_sel = st.selectbox(
-    "Filtrar por persona:",
-    personas,
-    key="persona_tabla",
-)
-
-
-    mapa_img = generar_heatmap(df, persona_sel)
-    st.image(mapa_img, use_container_width=True)
-
-    ...
-
-
-    # ---- Mapa de calor ----
-    st.markdown("---")
-    st.subheader("Mapa de calor en la planta")
-
-    personas = ["Todos"] + sorted(df["nombre"].dropna().unique().tolist())
-    persona_sel = st.selectbox("Filtrar por persona:", personas)
+        "Filtrar por persona:",
+        personas,
+        key="persona_mapa",
+    )
 
     mapa_img = generar_heatmap(df, persona_sel)
     st.image(mapa_img, use_container_width=True)
@@ -261,7 +268,7 @@ def vista_panel():
     # ---- Tabla de registros ----
     st.markdown("---")
     puntos = ["Todos"] + sorted(df["punto"].dropna().unique().tolist())
-    punto_sel = st.selectbox("Filtrar por punto", puntos)
+    punto_sel = st.selectbox("Filtrar por punto", puntos, key="punto_tabla")
 
     df_filtrado = df.copy()
     if punto_sel != "Todos":
@@ -269,10 +276,9 @@ def vista_panel():
 
     st.subheader("Registros detallados")
     st.dataframe(
-    df_filtrado.sort_values("timestamp", ascending=False),
-    use_container_width=True,
-)
-
+        df_filtrado.sort_values("timestamp", ascending=False),
+        use_container_width=True,
+    )
 
     # ---- Descarga de CSV ----
     st.markdown("---")
@@ -285,7 +291,6 @@ def vista_panel():
         mime="text/csv",
         use_container_width=True,
     )
-
 
 # -------------------------
 # Main
@@ -310,7 +315,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-
-
-
-
