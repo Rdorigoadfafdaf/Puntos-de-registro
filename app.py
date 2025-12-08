@@ -186,51 +186,64 @@ def color_heat(value: float) -> tuple:
 
 
 def generar_heatmap(df, selected_person=None):
-    """Dibuja un mapa de calor difuminado sobre planta.png."""
-    base = imagen_planta.copy()          # fondo satelital
-    heat = Image.new("RGBA", base.size, (0, 0, 0, 0))  # capa de calor transparente
+    """Genera un mapa de calor realista (azul→rojo) sobre planta.png usando Pillow."""
+    img = imagen_planta.copy().convert("RGBA")
+    heat = Image.new("RGBA", img.size, (0, 0, 0, 0))
     draw = ImageDraw.Draw(heat)
 
-    # Filtrar por persona si se seleccionó una
+    # Filtrar registros por persona
     if selected_person and selected_person != "Todos":
         df = df[df["nombre"] == selected_person]
 
     if df.empty:
-        return base.convert("RGB")
+        return img
 
-    # Normalizar nombres de punto
-    df = df.copy()
-    df["punto_norm"] = df["punto"].apply(normalizar)
+    # Normalizar nombres para que coincidan con coordenadas
+    df["punto_norm"] = df["punto"].str.strip()
 
-        # Contar registros por punto normalizado
+    # Contar registros por punto
     counts = df["punto_norm"].value_counts()
 
-    # ⚖️ Escala fija: queremos que 10 registros = rojo (intensidad 1.0)
+    # ---- ESCALA FIJA ----
+    # 1 registro = azul intenso
+    # 10 registros = rojo intenso
+    ESCALA_MIN = 1
     ESCALA_MAX = 10
-    max_count = max(counts.max(), ESCALA_MAX)
 
-    for p_norm, n in counts.items():
-        if p_norm not in PUNTOS_COORDS:
+    for punto, n in counts.items():
+        if punto not in PUNTOS_COORDS:
             continue
 
-        x, y = PUNTOS_COORDS[p_norm]
+        x, y = PUNTOS_COORDS[punto]
 
-        # Intensidad 0-1 usando la escala fija
-        intensity = min(1.0, n / max_count)
+        # Normalizamos n al rango 0–1 para el colormap
+        n_clamped = max(ESCALA_MIN, min(n, ESCALA_MAX))
+        t = (n_clamped - ESCALA_MIN) / (ESCALA_MAX - ESCALA_MIN)
 
+        # ---- Colormap azul→rojo ----
+        # azul (0,0,255) → rojo (255,0,0)
+        r = int(255 * t)
+        g = int(0)
+        b = int(255 * (1 - t))
 
-        # Color según intensidad
-        color = color_heat(intensity)
+        # Intensidad de alpha
+        alpha = int(120 + t * 135)  # más intensidad cuando t es grande
 
-        # Radio proporcional a intensidad
-        r = int(25 + 45 * intensity)  # mínimo 25, máximo ~70
+        # Radio según registros
+        radius = 70
 
-        # Dibujamos un círculo "caliente" en la capa de calor
         draw.ellipse(
-            (x - r, y - r, x + r, y + r),
-            fill=color,
-            outline=None,
+            (x - radius, y - radius, x + radius, y + radius),
+            fill=(r, g, b, alpha)
         )
+
+    # ---- Difuminado (BLUR) para efecto real de heatmap ----
+    heat = heat.filter(ImageFilter.GaussianBlur(60))
+
+    # Combinar heatmap con imagen original
+    final = Image.alpha_composite(img, heat)
+
+    return final
 
     # Difuminamos la capa de calor para que se vea más suave
     heat_blur = heat.filter(ImageFilter.GaussianBlur(radius=35))
@@ -366,4 +379,5 @@ def main():
 
 if __name__ == "__main__":
     main()
+
 
