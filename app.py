@@ -185,22 +185,43 @@ def color_heat(value: float) -> tuple:
     return (r, g, b, 180)  # alpha 180 para transparencia
 
 
-def generar_heatmap(df, selected_person=None):
-    """Genera un mapa de calor tipo 'heatmap de fútbol' sobre planta.png usando Pillow."""
-    # Copiamos la imagen base
-    img = imagen_planta.copy().convert("RGBA")
+def color_heat(value: float) -> tuple:
+    """
+    Devuelve un color RGBA según el valor normalizado 0-1.
+    0   → completamente transparente (sin color)
+    0.33→ verde
+    0.66→ amarillo
+    1   → rojo fuerte
+    """
+    v = max(0.0, min(1.0, value))
 
-    # Capa en escala de grises donde pintamos intensidades (0–255)
-    heat = Image.new("L", img.size, 0)
-    draw = ImageDraw.Draw(heat)
+    # Si el valor es 0, devolvemos TRANSPARENTE
+    if v <= 0:
+        return (0, 0, 0, 0)  # sin color
 
-    # Filtrar registros por persona (si se seleccionó una)
-    if selected_person and selected_person != "Todos":
-        df = df[df["nombre"] == selected_person]
+    # Colores normales de la escala térmica
+    if v < 1/3:  # azul → verde (pero con alpha creciendo)
+        t = v / (1/3)
+        r = 0
+        g = int(255 * t)
+        b = int(255 * (1 - t))
+    elif v < 2/3:  # verde → amarillo
+        t = (v - 1/3) / (1/3)
+        r = int(255 * t)
+        g = 255
+        b = 0
+    else:  # amarillo → rojo
+        t = (v - 2/3) / (1/3)
+        r = 255
+        g = int(255 * (1 - t))
+        b = 0
 
-    if df.empty:
-        # No hay registros → devolvemos solo la imagen de la planta
-        return img
+    # Alpha progresivo (muy importante)
+    # 0.05 → tenue (casi invisible)
+    # 1    → totalmente visible
+    alpha = int(255 * v)
+
+    return (r, g, b, alpha)
 
     # Normalizar nombres de punto para que coincidan con las claves de PUNTOS_COORDS
     df = df.copy()
@@ -389,6 +410,7 @@ def main():
 
 if __name__ == "__main__":
     main()
+
 
 
 
