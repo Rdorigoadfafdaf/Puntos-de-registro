@@ -202,9 +202,12 @@ def generar_heatmap(df, selected_person=None):
     df = df.copy()
     df["punto_norm"] = df["punto"].apply(normalizar)
 
-    # Contar registros por punto normalizado
+        # Contar registros por punto normalizado
     counts = df["punto_norm"].value_counts()
-    max_count = counts.max()
+
+    # ⚖️ Escala fija: queremos que 10 registros = rojo (intensidad 1.0)
+    ESCALA_MAX = 10
+    max_count = max(counts.max(), ESCALA_MAX)
 
     for p_norm, n in counts.items():
         if p_norm not in PUNTOS_COORDS:
@@ -212,8 +215,9 @@ def generar_heatmap(df, selected_person=None):
 
         x, y = PUNTOS_COORDS[p_norm]
 
-        # Intensidad 0-1
-        intensity = n / max_count if max_count > 0 else 0.0
+        # Intensidad 0-1 usando la escala fija
+        intensity = min(1.0, n / max_count)
+
 
         # Color según intensidad
         color = color_heat(intensity)
@@ -362,3 +366,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+
