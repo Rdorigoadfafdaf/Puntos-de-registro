@@ -225,7 +225,12 @@ def vista_panel():
     st.subheader("Mapa de calor en la planta")
 
     personas = ["Todos"] + sorted(df["nombre"].dropna().unique().tolist())
-    persona_sel = st.selectbox("Filtrar por persona:", personas)
+    persona_sel = st.selectbox(
+    "Filtrar por persona:",
+    personas,
+    key="persona_tabla",
+)
+
 
     mapa_img = generar_heatmap(df, persona_sel)
     st.image(mapa_img, use_container_width=True)
@@ -305,6 +310,7 @@ def main():
 
 if __name__ == "__main__":
     main()
+
 
 
 
