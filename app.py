@@ -231,7 +231,7 @@ def vista_panel():
     persona_sel = st.selectbox("Filtrar por persona:", personas)
 
     mapa_img = generar_heatmap(df, persona_sel)
-    st.image(mapa_img, use_column_width=True)
+    st.image(mapa_img, use_container_width=True)
 
     # ---- Métricas principales ----
     st.markdown("---")
@@ -254,9 +254,10 @@ def vista_panel():
 
     st.subheader("Registros detallados")
     st.dataframe(
-        df_filtrado.sort_values("timestamp", ascending=False),
-        use_column_width=True,
-    )
+    df_filtrado.sort_values("timestamp", ascending=False),
+    use_container_width=True,
+)
+
 
     # ---- Descarga de CSV ----
     st.markdown("---")
@@ -294,4 +295,5 @@ def main():
 
 if __name__ == "__main__":
     main()
+
 
