@@ -338,7 +338,7 @@ def vista_panel():
     )
 
     mapa_img = generar_heatmap(df, persona_sel)
-    st.image(mapa_img, use_column_width=True)
+    st.image(mapa_img, use_container_width=True)  # ✅ cambiado
 
     # ---- Métricas principales ----
     st.markdown("---")
@@ -352,6 +352,8 @@ def vista_panel():
 
     # ---- Tabla de registros ----
     st.markdown("---")
+    st.subheader("Registros detallados")  # la sacamos fuera del if para que siempre aparezca
+
     puntos = ["Todos"] + sorted(df["punto"].dropna().unique().tolist())
     punto_sel = st.selectbox("Filtrar por punto", puntos, key="punto_tabla")
 
@@ -359,10 +361,9 @@ def vista_panel():
     if punto_sel != "Todos":
         df_filtrado = df_filtrado[df_filtrado["punto"] == punto_sel]
 
-        st.subheader("Registros detallados")
     st.dataframe(
         df_filtrado.sort_values("timestamp", ascending=False),
-        use_column_width=True,
+        use_container_width=True,  # ✅ cambiado
     )
 
     # ---- Descarga de CSV ----
@@ -401,4 +402,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-
