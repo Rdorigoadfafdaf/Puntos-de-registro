@@ -186,71 +186,81 @@ def color_heat(value: float) -> tuple:
 
 
 def generar_heatmap(df, selected_person=None):
-    """Genera un mapa de calor realista (azul→rojo) sobre planta.png usando Pillow."""
+    """Genera un mapa de calor tipo 'heatmap de fútbol' sobre planta.png usando Pillow."""
+    # Copiamos la imagen base
     img = imagen_planta.copy().convert("RGBA")
-    heat = Image.new("RGBA", img.size, (0, 0, 0, 0))
+
+    # Capa en escala de grises donde pintamos intensidades (0–255)
+    heat = Image.new("L", img.size, 0)
     draw = ImageDraw.Draw(heat)
 
-    # Filtrar registros por persona
+    # Filtrar registros por persona (si se seleccionó una)
     if selected_person and selected_person != "Todos":
         df = df[df["nombre"] == selected_person]
 
     if df.empty:
+        # No hay registros → devolvemos solo la imagen de la planta
         return img
 
-    # Normalizar nombres para que coincidan con coordenadas
-    df["punto_norm"] = df["punto"].str.strip()
+    # Normalizar nombres de punto para que coincidan con las claves de PUNTOS_COORDS
+    df = df.copy()
+    df["punto_norm"] = df["punto"].apply(normalizar)
 
-    # Contar registros por punto
+    # Conteo de registros por punto normalizado
     counts = df["punto_norm"].value_counts()
 
-    # ---- ESCALA FIJA ----
-    # 1 registro = azul intenso
-    # 10 registros = rojo intenso
+    # ESCALA FIJA:
+    # 1 registro = azul intenso (mínimo caliente)
+    # 10 registros = rojo intenso (máximo caliente)
     ESCALA_MIN = 1
     ESCALA_MAX = 10
 
-    for punto, n in counts.items():
-        if punto not in PUNTOS_COORDS:
+    for punto_norm, n in counts.items():
+        if punto_norm not in PUNTOS_COORDS:
             continue
 
-        x, y = PUNTOS_COORDS[punto]
+        x, y = PUNTOS_COORDS[punto_norm]
 
-        # Normalizamos n al rango 0–1 para el colormap
+        # Normalizamos n a [0,1] según la escala fija
         n_clamped = max(ESCALA_MIN, min(n, ESCALA_MAX))
-        t = (n_clamped - ESCALA_MIN) / (ESCALA_MAX - ESCALA_MIN)
+        t = (n_clamped - ESCALA_MIN) / (ESCALA_MAX - ESCALA_MIN)  # 0 → 1
 
-        # ---- Colormap azul→rojo ----
-        # azul (0,0,255) → rojo (255,0,0)
-        r = int(255 * t)
-        g = int(0)
-        b = int(255 * (1 - t))
+        # Intensidad en la capa de grises (entre ~80 y 255 para que siempre se vea algo)
+        intensidad = int(80 + t * 175)  # 80 (pocos registros) → 255 (muchos registros)
 
-        # Intensidad de alpha
-        alpha = int(120 + t * 135)  # más intensidad cuando t es grande
-
-        # Radio según registros
-        radius = 70
+        # Radio del “spot” (como las zonas del campo en un heatmap de fútbol)
+        radius = 80
 
         draw.ellipse(
             (x - radius, y - radius, x + radius, y + radius),
-            fill=(r, g, b, alpha)
+            fill=intensidad
         )
 
-    # ---- Difuminado (BLUR) para efecto real de heatmap ----
+    # Difuminamos fuerte para que las zonas se mezclen
     heat = heat.filter(ImageFilter.GaussianBlur(60))
 
-    # Combinar heatmap con imagen original
-    final = Image.alpha_composite(img, heat)
+    # ---- Aplicar colormap azul→verde→amarillo→rojo usando color_heat() ----
+    # Precreamos LUTs (tablas) para R, G, B, A a partir de la escala 0–255 de la capa de grises
+    lut_r, lut_g, lut_b, lut_a = [], [], [], []
+    for i in range(256):
+        r, g, b, a = color_heat(i / 255.0)  # i/255.0 → valor normalizado 0–1
+        lut_r.append(r)
+        lut_g.append(g)
+        lut_b.append(b)
+        lut_a.append(a)
+
+    # Aplicamos las LUTs a la imagen en escala de grises
+    r = heat.point(lut_r)
+    g = heat.point(lut_g)
+    b = heat.point(lut_b)
+    a = heat.point(lut_a)
+
+    heat_rgba = Image.merge("RGBA", (r, g, b, a))
+
+    # Combinamos el heatmap coloreado con la imagen original
+    final = Image.alpha_composite(img, heat_rgba)
 
     return final
-
-    # Difuminamos la capa de calor para que se vea más suave
-    heat_blur = heat.filter(ImageFilter.GaussianBlur(radius=35))
-
-    # Combinamos el fondo con el heatmap
-    combinado = Image.alpha_composite(base, heat_blur)
-    return combinado.convert("RGB")
 
 
 # -------------------------
@@ -379,5 +389,6 @@ def main():
 
 if __name__ == "__main__":
     main()
+
 
 
