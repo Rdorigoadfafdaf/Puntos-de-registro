@@ -1,23 +1,47 @@
-from datetime import datetime
-from zoneinfo import ZoneInfo   # <--- IMPORTANTE
-import streamlit as st
-import pandas as pd
-from datetime import datetime
 import os
+from datetime import datetime
 
-# Rutas de archivos
+import pandas as pd
+import pytz
+import streamlit as st
+import gspread
+from google.oauth2.service_account import Credentials
+
+# -------------------------
+# Rutas de archivos locales
+# -------------------------
 RUTA_ARCHIVO = "registros.csv"
 RUTA_PERSONAS = "personas.csv"
 
 
-# ==============================
-# FUNCIONES DE DATOS
-# ==============================
+# -------------------------
+# Google Sheets
+# -------------------------
+
+def get_worksheet():
+    """Devuelve la hoja de cálculo de Google Sheets donde se guardan los registros."""
+    creds_info = st.secrets["gcp_service_account"]
+    scopes = [
+        "https://www.googleapis.com/auth/spreadsheets",
+        "https://www.googleapis.com/auth/drive",
+    ]
+    creds = Credentials.from_service_account_info(creds_info, scopes=scopes)
+    client = gspread.authorize(creds)
+
+    sheet_id = st.secrets["sheets"]["sheet_id"]
+    sh = client.open_by_key(sheet_id)
+
+    # Usamos la primera hoja del archivo
+    return sh.sheet1
+
+
+# -------------------------
+# Funciones de datos
+# -------------------------
 
 def cargar_personas():
     """Lee la lista de personas autorizadas desde personas.csv."""
     if os.path.exists(RUTA_PERSONAS):
-        # Leemos asumiendo separador ; (como está tu CSV actual)
         df = pd.read_csv(
             RUTA_PERSONAS,
             sep=";",
@@ -27,7 +51,6 @@ def cargar_personas():
         # Normalizamos columnas esperadas
         if "nombre" not in df.columns:
             df["nombre"] = ""
-
         if "activo" in df.columns:
             df["activo"] = df["activo"].fillna(0).astype(int)
         else:
@@ -40,17 +63,15 @@ def cargar_personas():
 
         return df
     else:
-        # Si no hay archivo, devolvemos DF vacío
         return pd.DataFrame(columns=["nombre", "activo"])
 
 
 def cargar_datos():
-    """Lee el archivo de registros, si existe."""
+    """Lee el archivo de registros local, si existe."""
     if os.path.exists(RUTA_ARCHIVO):
         try:
             return pd.read_csv(RUTA_ARCHIVO, sep=";", engine="python")
         except Exception:
-            # Si hay problema leyendo, devolvemos DF vacío con columnas correctas
             return pd.DataFrame(columns=[
                 "timestamp", "fecha", "hora",
                 "nombre", "punto"
@@ -63,10 +84,13 @@ def cargar_datos():
 
 
 def guardar_registro(nombre, punto):
+    """Agrega un registro nuevo al archivo y a Google Sheets."""
     df = cargar_datos()
 
-    # Hora de Perú (America/Lima)
-    ahora = datetime.now(ZoneInfo("America/Lima"))
+    # Hora de Perú
+    lima = pytz.timezone("America/Lima")
+    ahora = datetime.now(lima)
+
     fecha = ahora.strftime("%Y-%m-%d")
     hora = ahora.strftime("%H:%M:%S")
     timestamp = ahora.strftime("%Y-%m-%d %H:%M:%S")
@@ -79,15 +103,25 @@ def guardar_registro(nombre, punto):
         "punto": punto,
     }])
 
+    # 1) Guardar en CSV local (para el panel)
     df = pd.concat([df, nuevo], ignore_index=True)
-
-    # Guardamos con separador ; para que Excel lo abra en columnas
     df.to_csv(RUTA_ARCHIVO, index=False, sep=";")
 
+    # 2) Guardar automáticamente en Google Sheets
+    try:
+        ws = get_worksheet()
+        ws.append_row(
+            [timestamp, fecha, hora, nombre, punto],
+            value_input_option="USER_ENTERED"
+        )
+    except Exception as e:
+        # No rompemos la app si falla Sheets; solo mostramos aviso en los logs
+        st.write("⚠ No se pudo guardar en Google Sheets:", e)
 
-# ==============================
-# VISTAS
-# ==============================
+
+# -------------------------
+# Vistas
+# -------------------------
 
 def vista_registro():
     # Obtenemos el punto desde la URL ?punto=...
@@ -164,18 +198,22 @@ def vista_panel():
         use_container_width=True
     )
 
+    # Botón para descargar el histórico completo desde el panel
     st.markdown("---")
-    st.subheader("Registros por punto")
+    st.subheader("Descargar historial completo")
+    csv_bytes = df.to_csv(index=False, sep=";").encode("utf-8")
+    st.download_button(
+        label="⬇ Descargar registros.csv",
+        data=csv_bytes,
+        file_name="registros.csv",
+        mime="text/csv",
+        use_container_width=True
+    )
 
-    conteo = df.groupby("punto")["nombre"].count().reset_index()
-    conteo.rename(columns={"nombre": "registros"}, inplace=True)
 
-    st.bar_chart(conteo.set_index("punto")["registros"])
-
-
-# ==============================
-# MAIN / ENRUTADOR
-# ==============================
+# -------------------------
+# Main
+# -------------------------
 
 def main():
     st.set_page_config(
@@ -196,5 +234,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-
-
