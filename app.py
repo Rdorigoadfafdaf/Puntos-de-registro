@@ -1,3 +1,8 @@
+import streamlit as st
+import pandas as pd
+from datetime import datetime
+from PIL import Image, ImageDraw
+
 import os
 from datetime import datetime
 
@@ -12,7 +17,23 @@ from google.oauth2.service_account import Credentials
 # -------------------------
 RUTA_ARCHIVO = "registros.csv"
 RUTA_PERSONAS = "personas.csv"
+# Imagen de la planta para el mapa de calor
+imagen_planta = Image.open("planta.png")
 
+# Coordenadas aproximadas de cada punto sobre la imagen
+PUNTOS_COORDS = {
+    "Ventanas": (195, 608),
+    "Faja 2": (252, 587),
+    "Chancado Primario": (330, 560),      # ← estas las ajustamos luego
+    "Chancado Secundario": (388, 533),
+    "Cuarto Control": (650, 760),
+    "Filtro Zn": (455, 409),
+    "Flotación Zn": (623, 501),
+    "Flotación Pb": (691, 423),
+    "Tripper": (766, 452),
+    "Molienda": (802, 480),
+    "Nido de Ciclones 4": (811, 307),
+}
 
 # -------------------------
 # Google Sheets
@@ -163,9 +184,52 @@ def vista_registro():
             st.success(f"✅ Registro exitoso. Hola, {nombre_sel}.")
             st.info("Puedes cerrar esta ventana.")
 
+def generar_heatmap(df, selected_person=None):
+    """Dibuja el mapa de calor sobre planta.png usando los registros."""
+    img = imagen_planta.copy()
+    draw = ImageDraw.Draw(img)
+
+    # Filtrar por persona si se seleccionó una
+    if selected_person and selected_person != "Todos":
+        df = df[df["nombre"] == selected_person]
+
+    if df.empty:
+        return img
+
+    # Contar registros por punto
+    counts = df["punto"].value_counts()
+
+    for punto, n in counts.items():
+        if punto not in PUNTOS_COORDS:
+            continue
+
+        x, y = PUNTOS_COORDS[punto]
+        # Radio proporcional a cantidad de registros (ajustable)
+        r = min(60, 15 + n * 5)
+
+        # Círculo rojo semi-transparente
+        draw.ellipse(
+            (x - r, y - r, x + r, y + r),
+            fill=(255, 0, 0, 120),
+            outline=(255, 255, 255, 200),
+            width=2,
+        )
+
+    return img
 
 def vista_panel():
     st.title("Panel de Control - QR")
+    st.markdown("---")
+    st.subheader("Mapa de calor en la planta")
+
+    if df.empty:
+        st.info("No hay registros para mostrar en el mapa.")
+    else:
+        personas = ["Todos"] + sorted(df["nombre"].dropna().unique().tolist())
+        persona_sel = st.selectbox("Filtrar por persona:", personas)
+
+        mapa_img = generar_heatmap(df, persona_sel)
+        st.image(mapa_img, use_column_width=True)
 
     df = cargar_datos()
 
@@ -234,3 +298,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+
