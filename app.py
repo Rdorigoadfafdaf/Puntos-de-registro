@@ -217,11 +217,21 @@ def vista_panel():
     df = cargar_datos()
 
     if df.empty:
-        st.info(
-            "Aún no hay registros. Cuando empiecen a escanear los QR, "
-            "verás la información aquí."
-        )
+        st.info("Aún no hay registros...")
         return
+
+    # ---- Mapa de calor ----
+    st.markdown("---")
+    st.subheader("Mapa de calor en la planta")
+
+    personas = ["Todos"] + sorted(df["nombre"].dropna().unique().tolist())
+    persona_sel = st.selectbox("Filtrar por persona:", personas)
+
+    mapa_img = generar_heatmap(df, persona_sel)
+    st.image(mapa_img, use_container_width=True)
+
+    ...
+
 
     # ---- Mapa de calor ----
     st.markdown("---")
@@ -295,5 +305,6 @@ def main():
 
 if __name__ == "__main__":
     main()
+
 
 
