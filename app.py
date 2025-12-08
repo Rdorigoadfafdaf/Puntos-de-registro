@@ -159,35 +159,6 @@ def guardar_registro(nombre, punto):
 def color_heat(value: float) -> tuple:
     """
     Devuelve un color RGBA según el valor normalizado 0-1.
-    0   → azul
-    0.33→ verde
-    0.66→ amarillo
-    1   → rojo
-    """
-    v = max(0.0, min(1.0, value))
-
-    if v < 1/3:  # azul → verde
-        t = v / (1/3)
-        r = 0
-        g = int(255 * t)
-        b = int(255 * (1 - t))
-    elif v < 2/3:  # verde → amarillo
-        t = (v - 1/3) / (1/3)
-        r = int(255 * t)
-        g = 255
-        b = 0
-    else:  # amarillo → rojo
-        t = (v - 2/3) / (1/3)
-        r = 255
-        g = int(255 * (1 - t))
-        b = 0
-
-    return (r, g, b, 180)  # alpha 180 para transparencia
-
-
-def color_heat(value: float) -> tuple:
-    """
-    Devuelve un color RGBA según el valor normalizado 0-1.
     0   → completamente transparente (sin color)
     0.33→ verde
     0.66→ amarillo
@@ -195,12 +166,12 @@ def color_heat(value: float) -> tuple:
     """
     v = max(0.0, min(1.0, value))
 
-    # Si el valor es 0, devolvemos TRANSPARENTE
+    # Si el valor es 0, devolvemos TRANSPARENTE (no se pinta nada)
     if v <= 0:
-        return (0, 0, 0, 0)  # sin color
+        return (0, 0, 0, 0)
 
-    # Colores normales de la escala térmica
-    if v < 1/3:  # azul → verde (pero con alpha creciendo)
+    # Colores de la escala térmica
+    if v < 1/3:  # azul → verde (pero con alpha bajo para valores pequeños)
         t = v / (1/3)
         r = 0
         g = int(255 * t)
@@ -216,12 +187,32 @@ def color_heat(value: float) -> tuple:
         g = int(255 * (1 - t))
         b = 0
 
-    # Alpha progresivo (muy importante)
-    # 0.05 → tenue (casi invisible)
-    # 1    → totalmente visible
+    # Alpha progresivo (más valor → más visible)
     alpha = int(255 * v)
 
     return (r, g, b, alpha)
+
+
+def generar_heatmap(df, selected_person=None):
+    """
+    Genera un mapa de calor tipo 'heatmap de fútbol' sobre planta.png usando Pillow.
+    - Puntos sin registros → ningún color (no se pinta nada).
+    - 1 a 10 registros → escala térmica azul→verde→amarillo→rojo.
+    """
+    # Copiamos la imagen base
+    img = imagen_planta.copy().convert("RGBA")
+
+    # Capa en escala de grises donde pintamos intensidades (0–255)
+    heat = Image.new("L", img.size, 0)
+    draw = ImageDraw.Draw(heat)
+
+    # Filtrar registros por persona (si se seleccionó una)
+    if selected_person and selected_person != "Todos":
+        df = df[df["nombre"] == selected_person]
+
+    if df.empty:
+        # No hay registros → devolvemos solo la imagen de la planta
+        return img
 
     # Normalizar nombres de punto para que coincidan con las claves de PUNTOS_COORDS
     df = df.copy()
@@ -231,8 +222,8 @@ def color_heat(value: float) -> tuple:
     counts = df["punto_norm"].value_counts()
 
     # ESCALA FIJA:
-    # 1 registro = azul intenso (mínimo caliente)
-    # 10 registros = rojo intenso (máximo caliente)
+    # 1 registro = mínimo visible
+    # 10 registros = máximo calor
     ESCALA_MIN = 1
     ESCALA_MAX = 10
 
@@ -246,7 +237,7 @@ def color_heat(value: float) -> tuple:
         n_clamped = max(ESCALA_MIN, min(n, ESCALA_MAX))
         t = (n_clamped - ESCALA_MIN) / (ESCALA_MAX - ESCALA_MIN)  # 0 → 1
 
-        # Intensidad en la capa de grises (entre ~80 y 255 para que siempre se vea algo)
+        # Intensidad en la capa de grises (entre ~80 y 255) donde hay registros
         intensidad = int(80 + t * 175)  # 80 (pocos registros) → 255 (muchos registros)
 
         # Radio del “spot” (como las zonas del campo en un heatmap de fútbol)
@@ -371,7 +362,7 @@ def vista_panel():
     st.subheader("Registros detallados")
     st.dataframe(
         df_filtrado.sort_values("timestamp", ascending=False),
-        use_container_width=True,
+        use_column_width=True,
     )
 
     # ---- Descarga de CSV ----
@@ -410,7 +401,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-
-
-
-
