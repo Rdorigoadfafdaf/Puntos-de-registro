@@ -40,7 +40,7 @@ imagen_planta = Image.open("planta.png").convert("RGBA")
 PUNTOS_COORDS = {
     normalizar("Ventanas"): (195, 608),
     normalizar("Faja 2"): (252, 587),
-    normalizar("Chancado Primario"): (315, 560),
+    normalizar("Chancado Primario"): (300, 560),
     normalizar("Chancado Secundario"): (388, 533),
     normalizar("Cuarto Control"): (435, 465),
     normalizar("Filtro Zn"): (455, 409),
@@ -374,6 +374,7 @@ def main():
 
 if __name__ == "__main__":
     main()
+
 
 
 
