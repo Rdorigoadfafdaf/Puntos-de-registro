@@ -220,7 +220,7 @@ def generar_heatmap(df, selected_person=None):
     counts = df["punto_norm"].value_counts()
 
     # Dibujamos cada punto según su cantidad de registros
-    radius = 40  # radio del spot antes del blur
+    radius = 80  # radio del spot antes del blur
 
     for punto_norm, n in counts.items():
         if punto_norm not in PUNTOS_COORDS:
@@ -370,3 +370,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+
