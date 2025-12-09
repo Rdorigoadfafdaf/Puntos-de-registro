@@ -232,26 +232,20 @@ def generar_heatmap(df, persona_sel):
 
         x, y = PUNTOS_COORDS[punto_norm]
 
-        # Color según intensidad (usando la escala verde→amarillo→rojo)
         color = color_por_intensidad(int(n))
 
-        # Capa temporal para este punto
         capa = Image.new("RGBA", img.size, (0, 0, 0, 0))
         draw = ImageDraw.Draw(capa, "RGBA")
 
-        # Radio y blur MÁS pequeños para que no se difumine toda la planta
-        radius = 40       # antes era más grande
-        blur_radius = 18  # antes 60, muy alto
+        radius = 40       # tamaño del halo
+        blur_radius = 18  # cuánto se difumina
 
         draw.ellipse(
             (x - radius, y - radius, x + radius, y + radius),
             fill=color
         )
 
-        # Difuminar un poco para que se vea “heatmap”, pero cerca del punto
         capa = capa.filter(ImageFilter.GaussianBlur(blur_radius))
-
-        # Mezclar esta capa con la imagen final
         img = Image.alpha_composite(img, capa)
 
     return img
@@ -325,19 +319,22 @@ def vista_panel():
     with col1:
         st.subheader("📍 Mapa de puntos exactos")
         pts = generar_mapa_puntos(df, persona_sel)
-        st.image(pts, use_column_width=True)
+        st.image(pts, use_container_width=True)
 
     with col2:
         st.subheader("🔥 Mapa de calor (localizado)")
         heat = generar_heatmap(df, persona_sel)
-        st.image(heat, use_column_width=True)
+        st.image(heat, use_container_width=True)
 
     st.markdown("---")
     mostrar_leyenda(df)
 
     st.markdown("---")
     st.subheader("Registros detallados")
-    st.dataframe(df.sort_values("timestamp", ascending=False), use_column_width=True)
+    st.dataframe(
+        df.sort_values("timestamp", ascending=False),
+        use_container_width=True,
+    )
 
 
 # ---------------------------------------------------------
