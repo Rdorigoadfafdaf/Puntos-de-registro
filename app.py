@@ -154,41 +154,95 @@ def guardar_registro(nombre, punto):
 # Mapa de calor (escala térmica)
 # -------------------------
 
-def color_heat(value: float) -> tuple:
+def color_por_registros(n: int) -> tuple:
     """
-    Devuelve un color RGBA según el valor normalizado 0-1.
-    0   → completamente transparente (sin color)
-    0.33→ verde
-    0.66→ amarillo
-    1   → rojo fuerte
+    Devuelve un color RGBA según la cantidad de registros en un punto.
+    1   → verde leve
+    3   → verde amarillento
+    5   → amarillo
+    7   → naranja
+    10+ → rojo
     """
-    v = max(0.0, min(1.0, value))
+    if n <= 1:
+        # Verde leve
+        r, g, b = (80, 255, 80)
+    elif n <= 3:
+        # Verde amarillento
+        r, g, b = (173, 255, 47)  # yellowgreen
+    elif n <= 5:
+        # Amarillo
+        r, g, b = (255, 255, 0)
+    elif n <= 7:
+        # Naranja
+        r, g, b = (255, 165, 0)
+    else:
+        # Rojo (10 o más)
+        r, g, b = (255, 0, 0)
 
-    # Si el valor es 0, devolvemos TRANSPARENTE (no se pinta nada)
-    if v <= 0:
-        return (0, 0, 0, 0)
-
-    # Colores de la escala térmica
-    if v < 1/3:  # azul → verde (pero con alpha bajo para valores pequeños)
-        t = v / (1/3)
-        r = 0
-        g = int(255 * t)
-        b = int(255 * (1 - t))
-    elif v < 2/3:  # verde → amarillo
-        t = (v - 1/3) / (1/3)
-        r = int(255 * t)
-        g = 255
-        b = 0
-    else:  # amarillo → rojo
-        t = (v - 2/3) / (1/3)
-        r = 255
-        g = int(255 * (1 - t))
-        b = 0
-
-    # Alpha progresivo (más valor → más visible)
-    alpha = int(255 * v)
+    # Alpha según intensidad (más registros, más opaco)
+    # n máximo considerado = 10
+    n_clamped = max(1, min(n, 10))
+    t = (n_clamped - 1) / 9  # 1→0, 10→1
+    alpha = int(120 + 135 * t)  # 120–255
 
     return (r, g, b, alpha)
+
+
+def generar_heatmap(df, selected_person=None):
+    """
+    Genera un mapa de calor tipo 'heatmap de fútbol' sobre planta.png usando Pillow.
+    - Puntos sin registros → ningún color (no se dibuja nada).
+    - 1 registro → verde leve.
+    - 3 registros → verde amarillento.
+    - 5 registros → amarillo.
+    - 7 registros → naranja.
+    - 10+ registros → rojo.
+    """
+    # Copiamos la imagen base
+    img = imagen_planta.copy().convert("RGBA")
+
+    # Capa RGBA donde pintamos los 'spots' de calor
+    heat = Image.new("RGBA", img.size, (0, 0, 0, 0))
+    draw = ImageDraw.Draw(heat, "RGBA")
+
+    # Filtrar registros por persona (si se seleccionó una)
+    if selected_person and selected_person != "Todos":
+        df = df[df["nombre"] == selected_person]
+
+    if df.empty:
+        # No hay registros → devolvemos solo la imagen de la planta
+        return img
+
+    # Normalizar nombres de punto para que coincidan con las claves de PUNTOS_COORDS
+    df = df.copy()
+    df["punto_norm"] = df["punto"].apply(normalizar)
+
+    # Conteo de registros por punto normalizado
+    counts = df["punto_norm"].value_counts()
+
+    # Dibujamos cada punto según su cantidad de registros
+    radius = 40  # radio del spot antes del blur
+
+    for punto_norm, n in counts.items():
+        if punto_norm not in PUNTOS_COORDS:
+            continue
+
+        x, y = PUNTOS_COORDS[punto_norm]
+        color = color_por_registros(int(n))
+
+        draw.ellipse(
+            (x - radius, y - radius, x + radius, y + radius),
+            fill=color
+        )
+
+    # Difuminamos para efecto de mapa de calor suave
+    heat_blur = heat.filter(ImageFilter.GaussianBlur(60))
+
+    # Combinamos el heatmap coloreado con la imagen original
+    final = Image.alpha_composite(img, heat_blur)
+
+    return final
+
 
 
 def generar_heatmap(df, selected_person=None):
@@ -400,5 +454,6 @@ def main():
 
 if __name__ == "__main__":
     main()
+
 
 
