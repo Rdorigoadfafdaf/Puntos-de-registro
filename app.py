@@ -45,12 +45,10 @@ PUNTOS_COORDS = {
     normalizar("Cuarto Control"): (650, 760),
     normalizar("Filtro Zn"): (455, 409),
     normalizar("Flotacion Zn"): (623, 501),
-    normalizar("Flotación Zn"): (623, 501),   # por si viene con tilde
     normalizar("Flotacion Pb"): (691, 423),
-    normalizar("Flotación Pb"): (691, 423),
     normalizar("Tripper"): (766, 452),
     normalizar("Molienda"): (802, 480),
-    normalizar("Nido de Ciclones 4"): (811, 307),
+    normalizar("Nido de Ciclones N°3"): (811, 307),
 }
 
 
@@ -241,7 +239,7 @@ def generar_heatmap(df, selected_person=None):
         intensidad = int(80 + t * 175)  # 80 (pocos registros) → 255 (muchos registros)
 
         # Radio del “spot” (como las zonas del campo en un heatmap de fútbol)
-        radius = 80
+        radius = 12
 
         draw.ellipse(
             (x - radius, y - radius, x + radius, y + radius),
@@ -402,3 +400,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+
