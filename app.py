@@ -287,7 +287,7 @@ def vista_panel():
 
     with col2:
         st.subheader("Mapa de calor")
-        m2 = gerar_heatmap(df, persona_sel, debug=False)
+        m2 = generar_heatmap(df, persona_sel, debug=False)
         st.image(m2, use_container_width=True)
 
     st.markdown("---")
@@ -315,3 +315,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+
