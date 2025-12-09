@@ -251,20 +251,7 @@ def generar_heatmap(df, selected_person=None, debug=False):
 # -------------------------
 
 def vista_registro():
-    # JavaScript para expirar la página en 5 minutos
-st.markdown("""
-<script>
-let tiempo = 5 * 60 * 1000;  // 5 minutos en milisegundos
-setTimeout(function() {
-    // Cubre la pantalla con un mensaje
-    document.body.innerHTML = `
-        <div style="display:flex; height:100vh; justify-content:center; align-items:center; background:black; color:white; font-size:28px; text-align:center;">
-            ⛔ Este enlace ha expirado. Por favor vuelve a escanear el código QR.
-        </div>
-    `;
-}, tiempo);
-</script>
-""", unsafe_allow_html=True)
+    
 
     # Obtenemos el punto desde la URL ?punto=...
     params = st.query_params
@@ -389,6 +376,7 @@ def main():
 
 if __name__ == "__main__":
     main()
+
 
 
 
