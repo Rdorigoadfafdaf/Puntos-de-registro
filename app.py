@@ -9,6 +9,7 @@ from PIL import Image, ImageDraw, ImageFilter
 import gspread
 from google.oauth2.service_account import Credentials
 
+
 # -------------------------
 # Rutas de archivos locales
 # -------------------------
@@ -17,11 +18,9 @@ RUTA_PERSONAS = "personas.csv"
 
 
 # -------------------------
-# Utilidades de normalización
+# Normalizar textos
 # -------------------------
-
 def normalizar(texto: str) -> str:
-    """Convierte texto a minúsculas, sin tildes ni espacios extra."""
     if texto is None:
         return ""
     t = str(texto).strip().lower()
@@ -32,11 +31,15 @@ def normalizar(texto: str) -> str:
     return t
 
 
-# Imagen de la planta para el mapa de calor (RGBA para transparencias)
+# -------------------------
+# Imagen base
+# -------------------------
 imagen_planta = Image.open("planta.png").convert("RGBA")
 
-# Coordenadas aproximadas (en píxeles) de cada punto sobre la imagen
-# Claves ya normalizadas para facilitar el match con los registros
+
+# -------------------------
+# Coordenadas de los puntos
+# -------------------------
 PUNTOS_COORDS = {
     normalizar("Ventanas"): (195, 608),
     normalizar("Faja 2"): (252, 587),
@@ -55,9 +58,7 @@ PUNTOS_COORDS = {
 # -------------------------
 # Google Sheets
 # -------------------------
-
 def get_worksheet():
-    """Devuelve la hoja de cálculo de Google Sheets donde se guardan los registros."""
     creds_info = st.secrets["gcp_service_account"]
     scopes = [
         "https://www.googleapis.com/auth/spreadsheets",
@@ -66,65 +67,44 @@ def get_worksheet():
     creds = Credentials.from_service_account_info(creds_info, scopes=scopes)
     client = gspread.authorize(creds)
 
-    # OJO: aquí asumo que tienes una sección [sheets] con sheet_id
-    # Si pusiste sheet_id dentro de [gcp_service_account], cambia esta línea a:
-    # sheet_id = st.secrets["gcp_service_account"]["sheet_id"]
     sheet_id = st.secrets["sheets"]["sheet_id"]
-
     sh = client.open_by_key(sheet_id)
-    return sh.sheet1  # primera hoja
+    return sh.sheet1
 
 
 # -------------------------
-# Funciones de datos
+# Cargar/guardar datos
 # -------------------------
-
 def cargar_personas():
-    """Lee la lista de personas autorizadas desde personas.csv."""
     if os.path.exists(RUTA_PERSONAS):
-        df = pd.read_csv(
-            RUTA_PERSONAS,
-            sep=";",
-            engine="python",
-        )
-
-        if "nombre" not in df.columns:
-            df["nombre"] = ""
+        df = pd.read_csv(RUTA_PERSONAS, sep=";", engine="python")
         if "activo" in df.columns:
             df["activo"] = df["activo"].fillna(0).astype(int)
         else:
             df["activo"] = 1
-
         df["nombre"] = df["nombre"].astype(str).str.strip()
-        df = df[df["activo"] == 1]
-
-        return df
-
+        return df[df["activo"] == 1]
     return pd.DataFrame(columns=["nombre", "activo"])
 
 
 def cargar_datos():
-    """Lee el archivo de registros local, si existe."""
     if os.path.exists(RUTA_ARCHIVO):
         try:
             return pd.read_csv(RUTA_ARCHIVO, sep=";", engine="python")
-        except Exception:
+        except:
             pass
-
     return pd.DataFrame(columns=["timestamp", "fecha", "hora", "nombre", "punto"])
 
 
 def guardar_registro(nombre, punto):
-    """Agrega un registro nuevo al archivo local y a Google Sheets."""
     df = cargar_datos()
 
-    # Hora de Perú
     lima = pytz.timezone("America/Lima")
     ahora = datetime.now(lima)
 
+    timestamp = ahora.strftime("%Y-%m-%d %H:%M:%S")
     fecha = ahora.strftime("%Y-%m-%d")
     hora = ahora.strftime("%H:%M:%S")
-    timestamp = ahora.strftime("%Y-%m-%d %H:%M:%S")
 
     nuevo = pd.DataFrame([{
         "timestamp": timestamp,
@@ -134,85 +114,54 @@ def guardar_registro(nombre, punto):
         "punto": punto,
     }])
 
-    # 1) Guardar en CSV local (para el panel)
     df = pd.concat([df, nuevo], ignore_index=True)
     df.to_csv(RUTA_ARCHIVO, index=False, sep=";")
 
-    # 2) Guardar automáticamente en Google Sheets
     try:
         ws = get_worksheet()
-        ws.append_row(
-            [timestamp, fecha, hora, nombre, punto],
-            value_input_option="USER_ENTERED",
-        )
+        ws.append_row([timestamp, fecha, hora, nombre, punto])
     except Exception as e:
-        # No rompemos la app si falla Sheets; solo mostramos aviso
         st.write("⚠ No se pudo guardar en Google Sheets:", e)
 
 
 # -------------------------
-# Mapa de calor (por número de registros)
+# Colores según número de registros
 # -------------------------
-
 def color_por_registros(n: int) -> tuple:
-    """
-    Devuelve un color RGBA según la cantidad de registros en un punto.
-    1   → verde leve
-    3   → verde amarillento
-    5   → amarillo
-    7   → naranja
-    10+ → rojo
-    """
     if n <= 1:
-        # Verde leve
-        r, g, b = (80, 255, 80)
+        rgb = (80, 255, 80)
     elif n <= 3:
-        # Verde amarillento
-        r, g, b = (173, 255, 47)  # yellowgreen
+        rgb = (173, 255, 47)
     elif n <= 5:
-        # Amarillo
-        r, g, b = (255, 255, 0)
+        rgb = (255, 255, 0)
     elif n <= 7:
-        # Naranja
-        r, g, b = (255, 165, 0)
+        rgb = (255, 165, 0)
     else:
-        # Rojo (10 o más)
-        r, g, b = (255, 0, 0)
+        rgb = (255, 0, 0)
 
-    # Alpha según intensidad (más registros, más opaco)
-    n_clamped = max(1, min(n, 10))      # limitamos de 1 a 10
-    t = (n_clamped - 1) / 9.0           # 1→0, 10→1
-    alpha = int(120 + 135 * t)          # 120–255
+    n_clamped = max(1, min(n, 10))
+    t = (n_clamped - 1) / 9.0
+    alpha = int(120 + 135 * t)
 
-    return (r, g, b, alpha)
+    return (*rgb, alpha)
 
 
+# -------------------------
+# Heatmap + puntos
+# -------------------------
 def generar_heatmap(df, selected_person=None, debug=False):
-    """
-    Si debug=True → muestra solo puntos sólidos exactos en cada coordenada (sin mapa de calor).
-    Si debug=False → usa el mapa de calor normal.
-    """
-
-    # Copia de la imagen base
     img = imagen_planta.copy().convert("RGBA")
     draw = ImageDraw.Draw(img, "RGBA")
 
-    # Filtrar por persona si aplica
     if selected_person and selected_person != "Todos":
         df = df[df["nombre"] == selected_person]
 
     if df.empty:
         return img
 
-    # Normalizar nombres de punto
     df = df.copy()
     df["punto_norm"] = df["punto"].apply(normalizar)
-
-    # Contar registros por punto
     counts = df["punto_norm"].value_counts()
-
-    # Tamaño de punto para debug
-    radius = 15
 
     for punto_norm, n in counts.items():
         if punto_norm not in PUNTOS_COORDS:
@@ -221,25 +170,19 @@ def generar_heatmap(df, selected_person=None, debug=False):
         x, y = PUNTOS_COORDS[punto_norm]
 
         if debug:
-            # 🎯 Modo DEBUG → puntos sólidos de colores
-            color = (255, 0, 0, 255)   # Rojo sólido para verlos claramente
-
-            # Círculo sólido
+            # puntos exactos
             draw.ellipse(
-                (x - radius, y - radius, x + radius, y + radius),
-                fill=color,
-                outline=(255, 255, 255, 255),  # borde blanco
+                (x - 15, y - 15, x + 15, y + 15),
+                fill=(255, 0, 0, 255),
+                outline=(255, 255, 255, 255),
                 width=2
             )
         else:
-            # 🎯 Modo normal → mapa de calor que ya tienes
+            # heatmap
             color = color_por_registros(int(n))
             heat = Image.new("RGBA", img.size, (0, 0, 0, 0))
             hdraw = ImageDraw.Draw(heat, "RGBA")
-            hdraw.ellipse(
-                (x - 40, y - 40, x + 40, y + 40),
-                fill=color
-            )
+            hdraw.ellipse((x - 40, y - 40, x + 40, y + 40), fill=color)
             heat = heat.filter(ImageFilter.GaussianBlur(60))
             img = Image.alpha_composite(img, heat)
 
@@ -247,13 +190,21 @@ def generar_heatmap(df, selected_person=None, debug=False):
 
 
 # -------------------------
-# Vistas
+# Vista Registro (expira)
 # -------------------------
-
 def vista_registro():
-    
+    st.markdown("""
+    <script>
+    let tiempo = 2 * 60 * 1000;
+    setTimeout(function() {
+        document.body.innerHTML = `
+        <div style="display:flex; height:100vh; justify-content:center; align-items:center; background:black; color:white; font-size:28px;">
+            ⛔ Este enlace ha expirado. Escanee nuevamente el código QR.
+        </div>`;
+    }, tiempo);
+    </script>
+    """, unsafe_allow_html=True)
 
-    # Obtenemos el punto desde la URL ?punto=...
     params = st.query_params
     punto = params.get("punto", "SIN_PUNTO")
     if isinstance(punto, list):
@@ -262,109 +213,90 @@ def vista_registro():
     st.title("Control de Presencia por QR")
     st.subheader(f"Punto de control: {punto}")
 
-    st.markdown(
-        """
-        <p style="color: #bbb; font-size: 14px;">
-        Selecciona tu nombre de la lista y presiona <b>Registrar presencia</b>.
-        El sistema registrará tu nombre, el punto de control, la fecha y la hora.
-        </p>
-        """,
-        unsafe_allow_html=True,
-    )
-
     personas = cargar_personas()
     if personas.empty:
-        st.error("No hay personas cargadas en personas.csv o ninguna está activa.")
+        st.error("No hay personas cargadas.")
         return
 
     nombres = sorted(personas["nombre"].dropna().unique().tolist())
     nombre_sel = st.selectbox("Selecciona tu nombre", ["-- Selecciona --"] + nombres)
 
     if st.button("Registrar presencia", use_container_width=True):
-        if nombre_sel == "-- Selecciona --":
-            st.error("Por favor selecciona tu nombre.")
+        if nombre_sel != "-- Selecciona --":
+            guardar_registro(nombre_sel, punto)
+            st.success(f"Registro exitoso, {nombre_sel}.")
         else:
-            guardar_registro(nombre=nombre_sel, punto=punto)
-            st.success(f"✅ Registro exitoso. Hola, {nombre_sel}.")
-            st.info("Puedes cerrar esta ventana.")
+            st.error("Selecciona un nombre válido.")
 
 
+# -------------------------
+# Vista Panel (2 mapas + expira)
+# -------------------------
 def vista_panel():
+
+    st.markdown("""
+    <script>
+    let tiempo = 2 * 60 * 1000;
+    setTimeout(function() {
+        document.body.innerHTML = `
+        <div style="display:flex; height:100vh; justify-content:center; align-items:center; background:black; color:white; font-size:28px;">
+            ⛔ La sesión ha expirado. Escanee nuevamente el código QR.
+        </div>`;
+    }, tiempo);
+    </script>
+    """, unsafe_allow_html=True)
+
     st.title("Panel de Control - QR")
 
-    # Cargar datos primero
     df = cargar_datos()
-
     if df.empty:
-        st.info("Aún no hay registros...")
+        st.info("Aún no hay registros.")
         return
 
-    # ---- Mapa de calor ----
-    st.markdown("---")
-    st.subheader("Mapa de calor en la planta")
-
     personas = ["Todos"] + sorted(df["nombre"].dropna().unique().tolist())
-    persona_sel = st.selectbox(
-        "Filtrar por persona:",
-        personas,
-        key="persona_mapa",
-    )
+    persona_sel = st.selectbox("Filtrar por persona:", personas)
 
-    mapa_img = generar_heatmap(df, persona_sel, debug=True)
+    col1, col2 = st.columns(2)
 
-    st.image(mapa_img, use_container_width=True)
-
-    # ---- Métricas principales ----
-    st.markdown("---")
-    col1, col2, col3 = st.columns(3)
     with col1:
-        st.metric("Total de registros", len(df))
-    with col2:
-        st.metric("Puntos únicos", df["punto"].nunique())
-    with col3:
-        st.metric("Personas únicas", df["nombre"].nunique())
+        st.subheader("Mapa con puntos exactos")
+        img_debug = generar_heatmap(df, persona_sel, debug=True)
+        st.image(img_debug, use_column_width=True)
 
-    # ---- Tabla de registros ----
+    with col2:
+        st.subheader("Mapa de calor")
+        img_heat = generar_heatmap(df, persona_sel, debug=False)
+        st.image(img_heat, use_column_width=True)
+
+    st.markdown("---")
+
+    colA, colB, colC = st.columns(3)
+    colA.metric("Total registros", len(df))
+    colB.metric("Puntos únicos", df["punto"].nunique())
+    colC.metric("Personas únicas", df["nombre"].nunique())
+
     st.markdown("---")
     st.subheader("Registros detallados")
 
     puntos = ["Todos"] + sorted(df["punto"].dropna().unique().tolist())
-    punto_sel = st.selectbox("Filtrar por punto", puntos, key="punto_tabla")
+    punto_sel = st.selectbox("Filtrar por punto:", puntos)
 
-    df_filtrado = df.copy()
-    if punto_sel != "Todos":
-        df_filtrado = df_filtrado[df_filtrado["punto"] == punto_sel]
+    df_filt = df if punto_sel == "Todos" else df[df["punto"] == punto_sel]
 
-    st.dataframe(
-        df_filtrado.sort_values("timestamp", ascending=False),
-        use_container_width=True,
-    )
+    st.dataframe(df_filt.sort_values("timestamp", ascending=False), use_container_width=True)
 
-    # ---- Descarga de CSV ----
     st.markdown("---")
-    st.subheader("Descargar historial completo")
     csv_bytes = df.to_csv(index=False, sep=";").encode("utf-8")
-    st.download_button(
-        label="⬇ Descargar registros.csv",
-        data=csv_bytes,
-        file_name="registros.csv",
-        mime="text/csv",
-        use_container_width=True,
-    )
+    st.download_button("⬇ Descargar CSV", csv_bytes, "registros.csv", "text/csv")
 
 
 # -------------------------
-# Main
+# MAIN
 # -------------------------
-
 def main():
-    st.set_page_config(
-        page_title="Control de Presencia por QR",
-        layout="centered",
-    )
+    st.set_page_config(page_title="Control QR", layout="wide")
 
-    params = st.query_params
-    modo = params.get("modo", "registro")
+    modo = st.query_params.get("modo", "registro")
     if isinstance(modo, list):
         modo = modo[0]
 
@@ -376,18 +308,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
