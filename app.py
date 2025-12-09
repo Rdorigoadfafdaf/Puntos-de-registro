@@ -308,7 +308,8 @@ def vista_panel():
         key="persona_mapa",
     )
 
-    mapa_img = generar_heatmap(df, persona_sel)
+    mapa_img = generar_heatmap(df, persona_sel, debug=True)
+
     st.image(mapa_img, use_container_width=True)
 
     # ---- Métricas principales ----
@@ -373,6 +374,7 @@ def main():
 
 if __name__ == "__main__":
     main()
+
 
 
 
