@@ -42,7 +42,7 @@ PUNTOS_COORDS = {
     normalizar("Faja 2"): (252, 587),
     normalizar("Chancado Primario"): (330, 560),
     normalizar("Chancado Secundario"): (388, 533),
-    normalizar("Cuarto Control"): (465, 485),
+    normalizar("Cuarto Control"): (440, 470),
     normalizar("Filtro Zn"): (455, 409),
     normalizar("Flotacion Zn"): (623, 501),
     normalizar("Flotacion Pb"): (691, 423),
@@ -374,6 +374,7 @@ def main():
 
 if __name__ == "__main__":
     main()
+
 
 
 
