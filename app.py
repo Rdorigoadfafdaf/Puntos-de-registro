@@ -151,7 +151,7 @@ def guardar_registro(nombre, punto):
 
 
 # -------------------------
-# Mapa de calor (escala térmica)
+# Mapa de calor (por número de registros)
 # -------------------------
 
 def color_por_registros(n: int) -> tuple:
@@ -180,17 +180,16 @@ def color_por_registros(n: int) -> tuple:
         r, g, b = (255, 0, 0)
 
     # Alpha según intensidad (más registros, más opaco)
-    # n máximo considerado = 10
-    n_clamped = max(1, min(n, 10))
-    t = (n_clamped - 1) / 9  # 1→0, 10→1
-    alpha = int(120 + 135 * t)  # 120–255
+    n_clamped = max(1, min(n, 10))      # limitamos de 1 a 10
+    t = (n_clamped - 1) / 9.0           # 1→0, 10→1
+    alpha = int(120 + 135 * t)          # 120–255
 
     return (r, g, b, alpha)
 
 
 def generar_heatmap(df, selected_person=None):
     """
-    Genera un mapa de calor tipo 'heatmap de fútbol' sobre planta.png usando Pillow.
+    Genera un mapa de calor tipo 'heatmap de fútbol' sobre planta.png.
     - Puntos sin registros → ningún color (no se dibuja nada).
     - 1 registro → verde leve.
     - 3 registros → verde amarillento.
@@ -240,89 +239,6 @@ def generar_heatmap(df, selected_person=None):
 
     # Combinamos el heatmap coloreado con la imagen original
     final = Image.alpha_composite(img, heat_blur)
-
-    return final
-
-
-
-def generar_heatmap(df, selected_person=None):
-    """
-    Genera un mapa de calor tipo 'heatmap de fútbol' sobre planta.png usando Pillow.
-    - Puntos sin registros → ningún color (no se pinta nada).
-    - 1 a 10 registros → escala térmica azul→verde→amarillo→rojo.
-    """
-    # Copiamos la imagen base
-    img = imagen_planta.copy().convert("RGBA")
-
-    # Capa en escala de grises donde pintamos intensidades (0–255)
-    heat = Image.new("L", img.size, 0)
-    draw = ImageDraw.Draw(heat)
-
-    # Filtrar registros por persona (si se seleccionó una)
-    if selected_person and selected_person != "Todos":
-        df = df[df["nombre"] == selected_person]
-
-    if df.empty:
-        # No hay registros → devolvemos solo la imagen de la planta
-        return img
-
-    # Normalizar nombres de punto para que coincidan con las claves de PUNTOS_COORDS
-    df = df.copy()
-    df["punto_norm"] = df["punto"].apply(normalizar)
-
-    # Conteo de registros por punto normalizado
-    counts = df["punto_norm"].value_counts()
-
-    # ESCALA FIJA:
-    # 1 registro = mínimo visible
-    # 10 registros = máximo calor
-    ESCALA_MIN = 1
-    ESCALA_MAX = 10
-
-    for punto_norm, n in counts.items():
-        if punto_norm not in PUNTOS_COORDS:
-            continue
-
-        x, y = PUNTOS_COORDS[punto_norm]
-
-        # Normalizamos n a [0,1] según la escala fija
-        n_clamped = max(ESCALA_MIN, min(n, ESCALA_MAX))
-        t = (n_clamped - ESCALA_MIN) / (ESCALA_MAX - ESCALA_MIN)  # 0 → 1
-
-        # Intensidad en la capa de grises (entre ~80 y 255) donde hay registros
-        intensidad = int(80 + t * 175)  # 80 (pocos registros) → 255 (muchos registros)
-
-        # Radio del “spot” (como las zonas del campo en un heatmap de fútbol)
-        radius =40 
-
-        draw.ellipse(
-            (x - radius, y - radius, x + radius, y + radius),
-            fill=intensidad
-        )
-
-    # Difuminamos fuerte para que las zonas se mezclen
-    heat = heat.filter(ImageFilter.GaussianBlur(60))
-
-    # ---- Aplicar colormap azul→verde→amarillo→rojo usando color_heat() ----
-    # Precreamos LUTs (tablas) para R, G, B, A a partir de la escala 0–255 de la capa de grises
-    lut_r, lut_g, lut_b, lut_a = [], [], [], []
-    for i in range(256):
-        r, g, b, a = color_heat(i / 255.0)  # i/255.0 → valor normalizado 0–1
-        lut_r.append(r)
-        lut_g.append(g)
-        lut_b.append(b)
-        lut_a.append(a)
-
-    # Aplicamos las LUTs a la imagen en escala de grises
-    r = heat.point(lut_r)
-    g = heat.point(lut_g)
-    b = heat.point(lut_b)
-    a = heat.point(lut_a)
-
-    heat_rgba = Image.merge("RGBA", (r, g, b, a))
-
-    # Combinamos el heatmap coloreado con la imagen original
-    final = Image.alpha_composite(img, heat_rgba)
 
     return final
 
@@ -390,7 +306,7 @@ def vista_panel():
     )
 
     mapa_img = generar_heatmap(df, persona_sel)
-    st.image(mapa_img, use_container_width=True)  # ✅ cambiado
+    st.image(mapa_img, use_container_width=True)
 
     # ---- Métricas principales ----
     st.markdown("---")
@@ -404,7 +320,7 @@ def vista_panel():
 
     # ---- Tabla de registros ----
     st.markdown("---")
-    st.subheader("Registros detallados")  # la sacamos fuera del if para que siempre aparezca
+    st.subheader("Registros detallados")
 
     puntos = ["Todos"] + sorted(df["punto"].dropna().unique().tolist())
     punto_sel = st.selectbox("Filtrar por punto", puntos, key="punto_tabla")
@@ -415,7 +331,7 @@ def vista_panel():
 
     st.dataframe(
         df_filtrado.sort_values("timestamp", ascending=False),
-        use_container_width=True,  # ✅ cambiado
+        use_container_width=True,
     )
 
     # ---- Descarga de CSV ----
@@ -454,6 +370,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-
-
-
