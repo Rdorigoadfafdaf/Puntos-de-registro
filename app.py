@@ -1,11 +1,10 @@
 import os
 import unicodedata
 from datetime import datetime
-
 import pandas as pd
 import pytz
 import streamlit as st
-from PIL import Image, ImageDraw
+from PIL import Image, ImageDraw, ImageFilter
 import gspread
 from google.oauth2.service_account import Credentials
 
@@ -35,7 +34,6 @@ def normalizar(texto: str) -> str:
 # ---------------------------------------------------------
 imagen_planta = Image.open("planta.png").convert("RGBA")
 
-# Coordenadas ajustadas
 PUNTOS_COORDS = {
     normalizar("Ventanas"): (195, 608),
     normalizar("Faja 2"): (252, 587),
@@ -62,7 +60,6 @@ def get_worksheet():
     ]
     creds = Credentials.from_service_account_info(creds_info, scopes=scopes)
     client = gspread.authorize(creds)
-
     sheet_id = st.secrets["sheets"]["sheet_id"]
     sh = client.open_by_key(sheet_id)
     return sh.sheet1
@@ -80,9 +77,7 @@ def cargar_personas():
             df["activo"] = 1
         df["activo"] = df["activo"].fillna(0).astype(int)
         df["nombre"] = df["nombre"].astype(str).str.strip()
-        df = df[df["activo"] == 1]
-        return df
-
+        return df[df["activo"] == 1]
     return pd.DataFrame(columns=["nombre", "activo"])
 
 
@@ -97,7 +92,6 @@ def cargar_datos():
 
 def guardar_registro(nombre, punto):
     df = cargar_datos()
-
     lima = pytz.timezone("America/Lima")
     ahora = datetime.now(lima)
 
@@ -120,74 +114,61 @@ def guardar_registro(nombre, punto):
         ws = get_worksheet()
         ws.append_row([timestamp, fecha, hora, nombre, punto],
                       value_input_option="USER_ENTERED")
-    except Exception as e:
-        st.write("⚠ No se pudo guardar en Google Sheets:", e)
+    except:
+        pass
 
 
 # ---------------------------------------------------------
-# ASIGNAR COLORES A PERSONAS
+# COLORES PARA PERSONAS
 # ---------------------------------------------------------
 PALETA = [
     (255, 99, 132, 255),
     (54, 162, 235, 255),
-    (75, 192, 192, 255),
     (255, 206, 86, 255),
+    (75, 192, 192, 255),
     (153, 102, 255, 255),
     (255, 159, 64, 255),
-    (0, 200, 83, 255),
-    (233, 30, 99, 255),
 ]
 
-
-def get_color_for_person(nombre, mapa_colores):
-    if nombre not in mapa_colores:
-        mapa_colores[nombre] = PALETA[len(mapa_colores) % len(PALETA)]
-    return mapa_colores[nombre]
+def get_color(nombre, mapa):
+    if nombre not in mapa:
+        mapa[nombre] = PALETA[len(mapa) % len(PALETA)]
+    return mapa[nombre]
 
 
 # ---------------------------------------------------------
-# GENERAR MAPA DE PUNTOS EXACTOS
+# MAPA DE PUNTOS EXACTOS
 # ---------------------------------------------------------
 def generar_mapa_puntos(df, persona_sel):
-    img = imagen_planta.copy().convert("RGBA")
+    img = imagen_planta.copy()
     draw = ImageDraw.Draw(img, "RGBA")
 
     if persona_sel != "Todos":
         df = df[df["nombre"] == persona_sel]
 
-    if df.empty:
-        return img
-
     df = df.copy()
     df["punto_norm"] = df["punto"].apply(normalizar)
 
-    counts = df["punto_norm"].value_counts()
-    mapa_colores = {}
+    offsets = [(0,0),(10,0),(-10,0),(0,10),(0,-10),(7,7),(7,-7),(-7,7),(-7,-7)]
+    color_map = {}
 
-    # desplazamientos pequeños alrededor del punto original
-    offsets = [
-        (0, 0), (12, 0), (-12, 0), (0, 12), (0, -12),
-        (8, 8), (8, -8), (-8, 8), (-8, -8),
-    ]
+    for p_norm, _ in df["punto_norm"].value_counts().items():
 
-    for idx, (punto_norm, n) in enumerate(counts.items()):
-        if punto_norm not in PUNTOS_COORDS:
+        if p_norm not in PUNTOS_COORDS:
             continue
 
-        base_x, base_y = PUNTOS_COORDS[punto_norm]
+        x0, y0 = PUNTOS_COORDS[p_norm]
 
-        personas_en_punto = df[df["punto_norm"] == punto_norm]["nombre"].unique().tolist()
+        personas = df[df["punto_norm"] == p_norm]["nombre"].unique()
 
-        for i, nombre in enumerate(personas_en_punto):
-            color = get_color_for_person(nombre, mapa_colores)
+        for i, nombre in enumerate(personas):
             dx, dy = offsets[i % len(offsets)]
-            x = base_x + dx
-            y = base_y + dy
+            color = get_color(nombre, color_map)
 
             draw.ellipse(
-                (x - 6, y - 6, x + 6, y + 6),
+                (x0 + dx - 6, y0 + dy - 6, x0 + dx + 6, y0 + dy + 6),
                 fill=color,
-                outline=(255, 255, 255, 255),
+                outline=(255,255,255,255),
                 width=1
             )
 
@@ -195,98 +176,132 @@ def generar_mapa_puntos(df, persona_sel):
 
 
 # ---------------------------------------------------------
+# MAPA DE CALOR (HEATMAP)
+# ---------------------------------------------------------
+def generar_heatmap(df, persona_sel):
+
+    img = imagen_planta.copy().convert("RGBA")
+    heat = Image.new("L", img.size, 0)
+    draw = ImageDraw.Draw(heat)
+
+    if persona_sel != "Todos":
+        df = df[df["nombre"] == persona_sel]
+
+    df = df.copy()
+    df["punto_norm"] = df["punto"].apply(normalizar)
+
+    counts = df["punto_norm"].value_counts()
+
+    for punto_norm, n in counts.items():
+
+        if punto_norm not in PUNTOS_COORDS:
+            continue
+
+        x, y = PUNTOS_COORDS[punto_norm]
+
+        intensidad = int(40 + min(n,10) * 20)
+        radius = 60
+
+        draw.ellipse(
+            (x - radius, y - radius, x + radius, y + radius),
+            fill=intensidad
+        )
+
+    heat = heat.filter(ImageFilter.GaussianBlur(60))
+
+    heat_colored = Image.merge(
+        "RGBA",
+        (
+            heat.point(lambda v: v * 2),
+            heat.point(lambda v: 255 - v),
+            heat.point(lambda v: 0),
+            heat
+        )
+    )
+
+    return Image.alpha_composite(img, heat_colored)
+
+
+# ---------------------------------------------------------
 # LEYENDA
 # ---------------------------------------------------------
-def mostrar_leyenda(df, persona_sel):
-    st.markdown("### Leyenda de colores")
-
-    mapa_colores = {}
-    personas = df["nombre"].unique().tolist() if persona_sel == "Todos" else [persona_sel]
-
-    for nombre in personas:
-        color = get_color_for_person(nombre, mapa_colores)
-        r, g, b, a = color
+def mostrar_leyenda(df):
+    st.markdown("### Leyenda")
+    color_map = {}
+    for nombre in df["nombre"].unique():
+        c = get_color(nombre, color_map)
+        r,g,b,a = c
         st.markdown(
-            f"""
-            <div style='display:flex; align-items:center; margin-bottom:4px;'>
-                <div style='width:16px; height:16px; border-radius:50%; background-color:rgba({r},{g},{b},1); margin-right:8px;'></div>
-                <span>{nombre}</span>
-            </div>
-            """,
+            f"<div style='display:flex;align-items:center;'>"
+            f"<div style='width:14px;height:14px;border-radius:50%;background:rgb({r},{g},{b});margin-right:6px;'></div>"
+            f"{nombre}"
+            f"</div>",
             unsafe_allow_html=True
         )
 
 
 # ---------------------------------------------------------
-# VISTA REGISTRO
+# VISTA: REGISTRO
 # ---------------------------------------------------------
 def vista_registro():
     params = st.query_params
-    punto = params.get("punto", "SIN_PUNTO")
-    if isinstance(punto, list):
-        punto = punto[0]
+    punto = params.get("punto","SIN_PUNTO")
+    if isinstance(punto,list): punto = punto[0]
 
-    st.title("Control de Presencia por QR")
-    st.subheader(f"Punto de control: {punto}")
+    st.title("Registro de Asistencia")
+    st.subheader(f"Punto: {punto}")
 
     personas = cargar_personas()
-    if personas.empty:
-        st.error("No hay personas cargadas.")
-        return
+    nombres = ["-- Selecciona --"] + sorted(personas["nombre"].tolist())
 
-    nombres = sorted(personas["nombre"].tolist())
-    nombre_sel = st.selectbox("Selecciona tu nombre", ["-- Selecciona --"] + nombres)
+    sel = st.selectbox("Selecciona tu nombre:", nombres)
 
-    if st.button("Registrar presencia", use_container_width=True):
-        if nombre_sel == "-- Selecciona --":
+    if st.button("Registrar", use_container_width=True):
+        if sel == "-- Selecciona --":
             st.error("Selecciona un nombre válido.")
         else:
-            guardar_registro(nombre_sel, punto)
-            st.success(f"Registro exitoso, {nombre_sel}.")
-            st.info("Ya puedes cerrar esta ventana.")
+            guardar_registro(sel, punto)
+            st.success(f"Se registró correctamente: {sel}")
 
 
 # ---------------------------------------------------------
-# VISTA PANEL
+# VISTA: PANEL
 # ---------------------------------------------------------
 def vista_panel():
-    st.title("Panel de Control - QR")
 
+    st.title("Panel de Control QR")
     df = cargar_datos()
-    if df.empty:
-        st.info("Aún no hay registros.")
-        return
-
-    st.markdown("---")
-    st.subheader("Mapa de puntos exactos")
 
     personas = ["Todos"] + sorted(df["nombre"].unique().tolist())
     persona_sel = st.selectbox("Filtrar por persona:", personas)
 
-    col1, col2 = st.columns([3, 1])
+    col1, col2 = st.columns(2)
 
     with col1:
-        img_debug = generar_mapa_puntos(df, persona_sel)
-        st.image(img_debug, use_column_width=True)
+        st.subheader("📍 Mapa de puntos exactos")
+        pts = generar_mapa_puntos(df, persona_sel)
+        st.image(pts, use_column_width=True)
 
     with col2:
-        mostrar_leyenda(df, persona_sel)
+        st.subheader("🔥 Mapa de calor")
+        heat = generar_heatmap(df, persona_sel)
+        st.image(heat, use_column_width=True)
 
     st.markdown("---")
-    st.subheader("Registros detallados")
-    st.dataframe(df.sort_values("timestamp", ascending=False), use_container_width=True)
+    mostrar_leyenda(df)
+
+    st.markdown("---")
+    st.subheader("Registros")
+    st.dataframe(df.sort_values("timestamp",ascending=False), use_container_width=True)
 
 
 # ---------------------------------------------------------
 # MAIN
 # ---------------------------------------------------------
 def main():
-    st.set_page_config(page_title="Control de Presencia por QR", layout="wide")
-
-    params = st.query_params
-    modo = params.get("modo", "registro")
-    if isinstance(modo, list):
-        modo = modo[0]
+    st.set_page_config(page_title="Control QR", layout="wide")
+    modo = st.query_params.get("modo","registro")
+    if isinstance(modo,list): modo = modo[0]
 
     if modo == "panel":
         vista_panel()
