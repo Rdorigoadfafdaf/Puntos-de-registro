@@ -1,6 +1,7 @@
 import os
 import unicodedata
 from datetime import datetime
+
 import pandas as pd
 import pytz
 import streamlit as st
@@ -85,7 +86,7 @@ def cargar_datos():
     if os.path.exists(RUTA_ARCHIVO):
         try:
             return pd.read_csv(RUTA_ARCHIVO, sep=";", engine="python")
-        except:
+        except Exception:
             pass
     return pd.DataFrame(columns=["timestamp", "fecha", "hora", "nombre", "punto"])
 
@@ -114,12 +115,12 @@ def guardar_registro(nombre, punto):
         ws = get_worksheet()
         ws.append_row([timestamp, fecha, hora, nombre, punto],
                       value_input_option="USER_ENTERED")
-    except:
+    except Exception:
         pass
 
 
 # ---------------------------------------------------------
-# COLORES PARA PERSONAS
+# COLORES PARA PERSONAS (MAPA DE PUNTOS)
 # ---------------------------------------------------------
 PALETA = [
     (255, 99, 132, 255),
@@ -129,6 +130,7 @@ PALETA = [
     (153, 102, 255, 255),
     (255, 159, 64, 255),
 ]
+
 
 def get_color(nombre, mapa):
     if nombre not in mapa:
@@ -146,19 +148,25 @@ def generar_mapa_puntos(df, persona_sel):
     if persona_sel != "Todos":
         df = df[df["nombre"] == persona_sel]
 
+    if df.empty:
+        return img
+
     df = df.copy()
     df["punto_norm"] = df["punto"].apply(normalizar)
 
-    offsets = [(0,0),(10,0),(-10,0),(0,10),(0,-10),(7,7),(7,-7),(-7,7),(-7,-7)]
+    offsets = [
+        (0, 0),
+        (10, 0), (-10, 0),
+        (0, 10), (0, -10),
+        (7, 7), (7, -7), (-7, 7), (-7, -7),
+    ]
     color_map = {}
 
     for p_norm, _ in df["punto_norm"].value_counts().items():
-
         if p_norm not in PUNTOS_COORDS:
             continue
 
         x0, y0 = PUNTOS_COORDS[p_norm]
-
         personas = df[df["punto_norm"] == p_norm]["nombre"].unique()
 
         for i, nombre in enumerate(personas):
@@ -168,7 +176,7 @@ def generar_mapa_puntos(df, persona_sel):
             draw.ellipse(
                 (x0 + dx - 6, y0 + dy - 6, x0 + dx + 6, y0 + dy + 6),
                 fill=color,
-                outline=(255,255,255,255),
+                outline=(255, 255, 255, 255),
                 width=1
             )
 
@@ -176,66 +184,95 @@ def generar_mapa_puntos(df, persona_sel):
 
 
 # ---------------------------------------------------------
-# MAPA DE CALOR (HEATMAP)
+# COLOR POR INTENSIDAD (PARA HEATMAP)
+# ---------------------------------------------------------
+def color_por_intensidad(n: int) -> tuple:
+    """
+    Devuelve un color RGBA según la cantidad de registros:
+    1 → verde, 5 → amarillo, 10+ → rojo
+    """
+    n_clamped = max(1, min(n, 10))
+    t = (n_clamped - 1) / 9.0  # 0 → poco, 1 → máximo
+
+    if t < 0.5:
+        # verde -> amarillo
+        u = t / 0.5
+        r = int(0 + u * 255)
+        g = 255
+    else:
+        # amarillo -> rojo
+        u = (t - 0.5) / 0.5
+        r = 255
+        g = int(255 * (1 - u))
+
+    b = 0
+    alpha = int(80 + t * 120)  # 80–200 aprox
+    return (r, g, b, alpha)
+
+
+# ---------------------------------------------------------
+# MAPA DE CALOR (HEATMAP MENOS DIFUMINADO)
 # ---------------------------------------------------------
 def generar_heatmap(df, persona_sel):
-
     img = imagen_planta.copy().convert("RGBA")
-    heat = Image.new("L", img.size, 0)
-    draw = ImageDraw.Draw(heat)
 
     if persona_sel != "Todos":
         df = df[df["nombre"] == persona_sel]
 
+    if df.empty:
+        return img
+
     df = df.copy()
     df["punto_norm"] = df["punto"].apply(normalizar)
-
     counts = df["punto_norm"].value_counts()
 
     for punto_norm, n in counts.items():
-
         if punto_norm not in PUNTOS_COORDS:
             continue
 
         x, y = PUNTOS_COORDS[punto_norm]
 
-        intensidad = int(40 + min(n,10) * 20)
-        radius = 60
+        # Color según intensidad (usando la escala verde→amarillo→rojo)
+        color = color_por_intensidad(int(n))
+
+        # Capa temporal para este punto
+        capa = Image.new("RGBA", img.size, (0, 0, 0, 0))
+        draw = ImageDraw.Draw(capa, "RGBA")
+
+        # Radio y blur MÁS pequeños para que no se difumine toda la planta
+        radius = 40       # antes era más grande
+        blur_radius = 18  # antes 60, muy alto
 
         draw.ellipse(
             (x - radius, y - radius, x + radius, y + radius),
-            fill=intensidad
+            fill=color
         )
 
-    heat = heat.filter(ImageFilter.GaussianBlur(60))
+        # Difuminar un poco para que se vea “heatmap”, pero cerca del punto
+        capa = capa.filter(ImageFilter.GaussianBlur(blur_radius))
 
-    heat_colored = Image.merge(
-        "RGBA",
-        (
-            heat.point(lambda v: v * 2),
-            heat.point(lambda v: 255 - v),
-            heat.point(lambda v: 0),
-            heat
-        )
-    )
+        # Mezclar esta capa con la imagen final
+        img = Image.alpha_composite(img, capa)
 
-    return Image.alpha_composite(img, heat_colored)
+    return img
 
 
 # ---------------------------------------------------------
 # LEYENDA
 # ---------------------------------------------------------
 def mostrar_leyenda(df):
-    st.markdown("### Leyenda")
+    st.markdown("### Leyenda de personas (colores del mapa de puntos)")
     color_map = {}
-    for nombre in df["nombre"].unique():
+    for nombre in sorted(df["nombre"].dropna().unique().tolist()):
         c = get_color(nombre, color_map)
-        r,g,b,a = c
+        r, g, b, a = c
         st.markdown(
-            f"<div style='display:flex;align-items:center;'>"
-            f"<div style='width:14px;height:14px;border-radius:50%;background:rgb({r},{g},{b});margin-right:6px;'></div>"
-            f"{nombre}"
-            f"</div>",
+            f"""
+            <div style='display:flex;align-items:center;margin-bottom:4px;'>
+                <div style='width:14px;height:14px;border-radius:50%;background:rgb({r},{g},{b});margin-right:6px;'></div>
+                <span style='font-size:14px;'>{nombre}</span>
+            </div>
+            """,
             unsafe_allow_html=True
         )
 
@@ -245,15 +282,19 @@ def mostrar_leyenda(df):
 # ---------------------------------------------------------
 def vista_registro():
     params = st.query_params
-    punto = params.get("punto","SIN_PUNTO")
-    if isinstance(punto,list): punto = punto[0]
+    punto = params.get("punto", "SIN_PUNTO")
+    if isinstance(punto, list):
+        punto = punto[0]
 
     st.title("Registro de Asistencia")
     st.subheader(f"Punto: {punto}")
 
     personas = cargar_personas()
-    nombres = ["-- Selecciona --"] + sorted(personas["nombre"].tolist())
+    if personas.empty:
+        st.error("No hay personas cargadas.")
+        return
 
+    nombres = ["-- Selecciona --"] + sorted(personas["nombre"].tolist())
     sel = st.selectbox("Selecciona tu nombre:", nombres)
 
     if st.button("Registrar", use_container_width=True):
@@ -262,17 +303,21 @@ def vista_registro():
         else:
             guardar_registro(sel, punto)
             st.success(f"Se registró correctamente: {sel}")
+            st.info("Ya puedes cerrar esta ventana.")
 
 
 # ---------------------------------------------------------
 # VISTA: PANEL
 # ---------------------------------------------------------
 def vista_panel():
+    st.title("Panel de Control - QR")
 
-    st.title("Panel de Control QR")
     df = cargar_datos()
+    if df.empty:
+        st.info("Aún no hay registros.")
+        return
 
-    personas = ["Todos"] + sorted(df["nombre"].unique().tolist())
+    personas = ["Todos"] + sorted(df["nombre"].dropna().unique().tolist())
     persona_sel = st.selectbox("Filtrar por persona:", personas)
 
     col1, col2 = st.columns(2)
@@ -283,7 +328,7 @@ def vista_panel():
         st.image(pts, use_column_width=True)
 
     with col2:
-        st.subheader("🔥 Mapa de calor")
+        st.subheader("🔥 Mapa de calor (localizado)")
         heat = generar_heatmap(df, persona_sel)
         st.image(heat, use_column_width=True)
 
@@ -291,8 +336,8 @@ def vista_panel():
     mostrar_leyenda(df)
 
     st.markdown("---")
-    st.subheader("Registros")
-    st.dataframe(df.sort_values("timestamp",ascending=False), use_container_width=True)
+    st.subheader("Registros detallados")
+    st.dataframe(df.sort_values("timestamp", ascending=False), use_column_width=True)
 
 
 # ---------------------------------------------------------
@@ -300,8 +345,9 @@ def vista_panel():
 # ---------------------------------------------------------
 def main():
     st.set_page_config(page_title="Control QR", layout="wide")
-    modo = st.query_params.get("modo","registro")
-    if isinstance(modo,list): modo = modo[0]
+    modo = st.query_params.get("modo", "registro")
+    if isinstance(modo, list):
+        modo = modo[0]
 
     if modo == "panel":
         vista_panel()
