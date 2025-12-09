@@ -187,60 +187,63 @@ def color_por_registros(n: int) -> tuple:
     return (r, g, b, alpha)
 
 
-def generar_heatmap(df, selected_person=None):
+def generar_heatmap(df, selected_person=None, debug=False):
     """
-    Genera un mapa de calor tipo 'heatmap de fútbol' sobre planta.png.
-    - Puntos sin registros → ningún color (no se dibuja nada).
-    - 1 registro → verde leve.
-    - 3 registros → verde amarillento.
-    - 5 registros → amarillo.
-    - 7 registros → naranja.
-    - 10+ registros → rojo.
+    Si debug=True → muestra solo puntos sólidos exactos en cada coordenada (sin mapa de calor).
+    Si debug=False → usa el mapa de calor normal.
     """
-    # Copiamos la imagen base
+
+    # Copia de la imagen base
     img = imagen_planta.copy().convert("RGBA")
+    draw = ImageDraw.Draw(img, "RGBA")
 
-    # Capa RGBA donde pintamos los 'spots' de calor
-    heat = Image.new("RGBA", img.size, (0, 0, 0, 0))
-    draw = ImageDraw.Draw(heat, "RGBA")
-
-    # Filtrar registros por persona (si se seleccionó una)
+    # Filtrar por persona si aplica
     if selected_person and selected_person != "Todos":
         df = df[df["nombre"] == selected_person]
 
     if df.empty:
-        # No hay registros → devolvemos solo la imagen de la planta
         return img
 
-    # Normalizar nombres de punto para que coincidan con las claves de PUNTOS_COORDS
+    # Normalizar nombres de punto
     df = df.copy()
     df["punto_norm"] = df["punto"].apply(normalizar)
 
-    # Conteo de registros por punto normalizado
+    # Contar registros por punto
     counts = df["punto_norm"].value_counts()
 
-    # Dibujamos cada punto según su cantidad de registros
-    radius = 80  # radio del spot antes del blur
+    # Tamaño de punto para debug
+    radius = 15
 
     for punto_norm, n in counts.items():
         if punto_norm not in PUNTOS_COORDS:
             continue
 
         x, y = PUNTOS_COORDS[punto_norm]
-        color = color_por_registros(int(n))
 
-        draw.ellipse(
-            (x - radius, y - radius, x + radius, y + radius),
-            fill=color
-        )
+        if debug:
+            # 🎯 Modo DEBUG → puntos sólidos de colores
+            color = (255, 0, 0, 255)   # Rojo sólido para verlos claramente
 
-    # Difuminamos para efecto de mapa de calor suave
-    heat_blur = heat.filter(ImageFilter.GaussianBlur(60))
+            # Círculo sólido
+            draw.ellipse(
+                (x - radius, y - radius, x + radius, y + radius),
+                fill=color,
+                outline=(255, 255, 255, 255),  # borde blanco
+                width=2
+            )
+        else:
+            # 🎯 Modo normal → mapa de calor que ya tienes
+            color = color_por_registros(int(n))
+            heat = Image.new("RGBA", img.size, (0, 0, 0, 0))
+            hdraw = ImageDraw.Draw(heat, "RGBA")
+            hdraw.ellipse(
+                (x - 40, y - 40, x + 40, y + 40),
+                fill=color
+            )
+            heat = heat.filter(ImageFilter.GaussianBlur(60))
+            img = Image.alpha_composite(img, heat)
 
-    # Combinamos el heatmap coloreado con la imagen original
-    final = Image.alpha_composite(img, heat_blur)
-
-    return final
+    return img
 
 
 # -------------------------
@@ -370,6 +373,7 @@ def main():
 
 if __name__ == "__main__":
     main()
+
 
 
 
