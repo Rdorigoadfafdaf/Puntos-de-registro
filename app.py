@@ -239,7 +239,7 @@ def generar_heatmap(df, selected_person=None):
         intensidad = int(80 + t * 175)  # 80 (pocos registros) → 255 (muchos registros)
 
         # Radio del “spot” (como las zonas del campo en un heatmap de fútbol)
-        radius = 12
+        radius =40 
 
         draw.ellipse(
             (x - radius, y - radius, x + radius, y + radius),
@@ -400,4 +400,5 @@ def main():
 
 if __name__ == "__main__":
     main()
+
 
