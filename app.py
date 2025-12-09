@@ -182,9 +182,22 @@ def generar_heatmap(df, selected_person=None, debug=False):
             color = color_por_registros(int(n))
             heat = Image.new("RGBA", img.size, (0, 0, 0, 0))
             hdraw = ImageDraw.Draw(heat, "RGBA")
-            hdraw.ellipse((x - 40, y - 40, x + 40, y + 40), fill=color)
-            heat = heat.filter(ImageFilter.GaussianBlur(60))
-            img = Image.alpha_composite(img, heat)
+           # --- NUEVO HEATMAP + DIFUMINADO ---
+            # Aumentamos tamaño y reducimos blur
+            base_radius = 70   # antes era 40
+            blur_amount = 25   # antes era 60
+
+hdraw.ellipse(
+    (x - base_radius, y - base_radius, x + base_radius, y + base_radius),
+    fill=color
+)
+
+# Difuminado más controlado
+heat = heat.filter(ImageFilter.GaussianBlur(blur_amount))
+
+# Aumentamos intensidad final mezclando dos capas
+img = Image.alpha_composite(img, heat)
+
 
     return img
 
@@ -308,3 +321,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+
