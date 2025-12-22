@@ -15,7 +15,6 @@ from google.oauth2.service_account import Credentials
 RUTA_ARCHIVO = "registros.csv"
 RUTA_PERSONAS = "personas.csv"
 
-
 # ---------------------------------------------------------
 # NORMALIZAR TEXTO
 # ---------------------------------------------------------
@@ -28,7 +27,6 @@ def normalizar(texto: str) -> str:
         if unicodedata.category(c) != "Mn"
     )
     return t
-
 
 # ---------------------------------------------------------
 # IMAGEN BASE DE LA PLANTA
@@ -49,7 +47,6 @@ PUNTOS_COORDS = {
     normalizar("Nido de Ciclones N°3"): (811, 307),
 }
 
-
 # ---------------------------------------------------------
 # GOOGLE SHEETS
 # ---------------------------------------------------------
@@ -64,7 +61,6 @@ def get_worksheet():
     sheet_id = st.secrets["sheets"]["sheet_id"]
     sh = client.open_by_key(sheet_id)
     return sh.sheet1
-
 
 # ---------------------------------------------------------
 # CARGA DE PERSONAS Y REGISTROS
@@ -81,7 +77,6 @@ def cargar_personas():
         return df[df["activo"] == 1]
     return pd.DataFrame(columns=["nombre", "activo"])
 
-
 def cargar_datos():
     if os.path.exists(RUTA_ARCHIVO):
         try:
@@ -90,6 +85,30 @@ def cargar_datos():
             pass
     return pd.DataFrame(columns=["timestamp", "fecha", "hora", "nombre", "punto"])
 
+# ---------------------------------------------------------
+# BLOQUEO DE REGISTRO POR TIEMPO (NUEVO)
+# ---------------------------------------------------------
+def puede_registrar(nombre, minutos=5):
+    df = cargar_datos()
+    if df.empty:
+        return True, None
+
+    df_persona = df[df["nombre"] == nombre]
+    if df_persona.empty:
+        return True, None
+
+    lima = pytz.timezone("America/Lima")
+    ahora = datetime.now(lima)
+
+    ultimo_ts = df_persona["timestamp"].iloc[-1]
+    ultimo_dt = lima.localize(datetime.strptime(ultimo_ts, "%Y-%m-%d %H:%M:%S"))
+
+    diff_min = (ahora - ultimo_dt).total_seconds() / 60
+
+    if diff_min < minutos:
+        return False, round(minutos - diff_min, 1)
+
+    return True, None
 
 def guardar_registro(nombre, punto):
     df = cargar_datos()
@@ -118,9 +137,8 @@ def guardar_registro(nombre, punto):
     except Exception:
         pass
 
-
 # ---------------------------------------------------------
-# COLORES PARA PERSONAS (MAPA DE PUNTOS)
+# COLORES PARA PERSONAS
 # ---------------------------------------------------------
 PALETA = [
     (255, 99, 132, 255),
@@ -131,15 +149,13 @@ PALETA = [
     (255, 159, 64, 255),
 ]
 
-
 def get_color(nombre, mapa):
     if nombre not in mapa:
         mapa[nombre] = PALETA[len(mapa) % len(PALETA)]
     return mapa[nombre]
 
-
 # ---------------------------------------------------------
-# MAPA DE PUNTOS EXACTOS
+# MAPA DE PUNTOS
 # ---------------------------------------------------------
 def generar_mapa_puntos(df, persona_sel):
     img = imagen_planta.copy()
@@ -155,8 +171,7 @@ def generar_mapa_puntos(df, persona_sel):
     df["punto_norm"] = df["punto"].apply(normalizar)
 
     offsets = [
-        (0, 0),
-        (10, 0), (-10, 0),
+        (0, 0), (10, 0), (-10, 0),
         (0, 10), (0, -10),
         (7, 7), (7, -7), (-7, 7), (-7, -7),
     ]
@@ -182,37 +197,26 @@ def generar_mapa_puntos(df, persona_sel):
 
     return img
 
-
 # ---------------------------------------------------------
-# COLOR POR INTENSIDAD (PARA HEATMAP)
+# HEATMAP
 # ---------------------------------------------------------
 def color_por_intensidad(n: int) -> tuple:
-    """
-    Devuelve un color RGBA según la cantidad de registros:
-    1 → verde, 5 → amarillo, 10+ → rojo
-    """
     n_clamped = max(1, min(n, 10))
-    t = (n_clamped - 1) / 9.0  # 0 → poco, 1 → máximo
+    t = (n_clamped - 1) / 9.0
 
     if t < 0.5:
-        # verde -> amarillo
         u = t / 0.5
-        r = int(0 + u * 255)
+        r = int(u * 255)
         g = 255
     else:
-        # amarillo -> rojo
         u = (t - 0.5) / 0.5
         r = 255
         g = int(255 * (1 - u))
 
     b = 0
-    alpha = int(80 + t * 120)  # 80–200 aprox
+    alpha = int(80 + t * 120)
     return (r, g, b, alpha)
 
-
-# ---------------------------------------------------------
-# MAPA DE CALOR (HEATMAP MENOS DIFUMINADO)
-# ---------------------------------------------------------
 def generar_heatmap(df, persona_sel):
     img = imagen_planta.copy().convert("RGBA")
 
@@ -231,48 +235,19 @@ def generar_heatmap(df, persona_sel):
             continue
 
         x, y = PUNTOS_COORDS[punto_norm]
-
         color = color_por_intensidad(int(n))
 
         capa = Image.new("RGBA", img.size, (0, 0, 0, 0))
         draw = ImageDraw.Draw(capa, "RGBA")
 
-        radius = 40       # tamaño del halo
-        blur_radius = 18  # cuánto se difumina
-
-        draw.ellipse(
-            (x - radius, y - radius, x + radius, y + radius),
-            fill=color
-        )
-
-        capa = capa.filter(ImageFilter.GaussianBlur(blur_radius))
+        draw.ellipse((x - 40, y - 40, x + 40, y + 40), fill=color)
+        capa = capa.filter(ImageFilter.GaussianBlur(18))
         img = Image.alpha_composite(img, capa)
 
     return img
 
-
 # ---------------------------------------------------------
-# LEYENDA
-# ---------------------------------------------------------
-def mostrar_leyenda(df):
-    st.markdown("### Leyenda de personas (colores del mapa de puntos)")
-    color_map = {}
-    for nombre in sorted(df["nombre"].dropna().unique().tolist()):
-        c = get_color(nombre, color_map)
-        r, g, b, a = c
-        st.markdown(
-            f"""
-            <div style='display:flex;align-items:center;margin-bottom:4px;'>
-                <div style='width:14px;height:14px;border-radius:50%;background:rgb({r},{g},{b});margin-right:6px;'></div>
-                <span style='font-size:14px;'>{nombre}</span>
-            </div>
-            """,
-            unsafe_allow_html=True
-        )
-
-
-# ---------------------------------------------------------
-# VISTA: REGISTRO
+# VISTAS
 # ---------------------------------------------------------
 def vista_registro():
     params = st.query_params
@@ -295,14 +270,17 @@ def vista_registro():
         if sel == "-- Selecciona --":
             st.error("Selecciona un nombre válido.")
         else:
-            guardar_registro(sel, punto)
-            st.success(f"Se registró correctamente: {sel}")
-            st.info("Ya puedes cerrar esta ventana.")
+            permitido, restante = puede_registrar(sel, minutos=5)
+            if not permitido:
+                st.warning(
+                    f"Ya registraste asistencia recientemente.\n\n"
+                    f"Espera aproximadamente {restante} minutos."
+                )
+            else:
+                guardar_registro(sel, punto)
+                st.success(f"Asistencia registrada correctamente: {sel}")
+                st.info("Ya puedes cerrar esta ventana.")
 
-
-# ---------------------------------------------------------
-# VISTA: PANEL
-# ---------------------------------------------------------
 def vista_panel():
     st.title("Panel de Control - QR")
 
@@ -317,25 +295,15 @@ def vista_panel():
     col1, col2 = st.columns(2)
 
     with col1:
-        st.subheader("📍 Mapa de puntos exactos")
-        pts = generar_mapa_puntos(df, persona_sel)
-        st.image(pts, use_container_width=True)
+        st.subheader("Mapa de puntos")
+        st.image(generar_mapa_puntos(df, persona_sel), use_container_width=True)
 
     with col2:
-        st.subheader("🔥 Mapa de calor (localizado)")
-        heat = generar_heatmap(df, persona_sel)
-        st.image(heat, use_container_width=True)
+        st.subheader("Mapa de calor")
+        st.image(generar_heatmap(df, persona_sel), use_container_width=True)
 
     st.markdown("---")
-    mostrar_leyenda(df)
-
-    st.markdown("---")
-    st.subheader("Registros detallados")
-    st.dataframe(
-        df.sort_values("timestamp", ascending=False),
-        use_container_width=True,
-    )
-
+    st.dataframe(df.sort_values("timestamp", ascending=False), use_container_width=True)
 
 # ---------------------------------------------------------
 # MAIN
@@ -350,7 +318,6 @@ def main():
         vista_panel()
     else:
         vista_registro()
-
 
 if __name__ == "__main__":
     main()
