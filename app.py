@@ -10,11 +10,10 @@ import gspread
 from google.oauth2.service_account import Credentials
 
 # ---------------------------------------------------------
-# CONFIGURACIÓN
+# ARCHIVOS LOCALES
 # ---------------------------------------------------------
 RUTA_ARCHIVO = "registros.csv"
 RUTA_PERSONAS = "personas.csv"
-MINUTOS_BLOQUEO = 4
 
 # ---------------------------------------------------------
 # NORMALIZAR TEXTO
@@ -59,8 +58,7 @@ def get_worksheet():
     ]
     creds = Credentials.from_service_account_info(creds_info, scopes=scopes)
     client = gspread.authorize(creds)
-    sheet_id = st.secrets["sheets"]["sheet_id"]
-    sh = client.open_by_key(sheet_id)
+    sh = client.open_by_key(st.secrets["sheets"]["sheet_id"])
     return sh.sheet1
 
 # ---------------------------------------------------------
@@ -79,9 +77,9 @@ def cargar_datos():
     return pd.DataFrame(columns=["timestamp", "fecha", "hora", "nombre", "punto"])
 
 # ---------------------------------------------------------
-# VALIDACIÓN DE TIEMPO (4 MIN)
+# BLOQUEO POR TIEMPO (4 MINUTOS)
 # ---------------------------------------------------------
-def puede_registrar(nombre):
+def puede_registrar(nombre, minutos=4):
     df = cargar_datos()
     if df.empty:
         return True, None
@@ -92,12 +90,13 @@ def puede_registrar(nombre):
 
     lima = pytz.timezone("America/Lima")
     ahora = datetime.now(lima)
-    ultimo = datetime.strptime(df_p.iloc[-1]["timestamp"], "%Y-%m-%d %H:%M:%S")
-    ultimo = lima.localize(ultimo)
 
-    diff = (ahora - ultimo).total_seconds() / 60
-    if diff < MINUTOS_BLOQUEO:
-        return False, round(MINUTOS_BLOQUEO - diff, 1)
+    ultimo = df_p.iloc[-1]["timestamp"]
+    ultimo_dt = lima.localize(datetime.strptime(ultimo, "%Y-%m-%d %H:%M:%S"))
+
+    diff = (ahora - ultimo_dt).total_seconds() / 60
+    if diff < minutos:
+        return False, round(minutos - diff, 1)
 
     return True, None
 
@@ -105,7 +104,7 @@ def guardar_registro(nombre, punto):
     lima = pytz.timezone("America/Lima")
     ahora = datetime.now(lima)
 
-    fila = {
+    nuevo = {
         "timestamp": ahora.strftime("%Y-%m-%d %H:%M:%S"),
         "fecha": ahora.strftime("%Y-%m-%d"),
         "hora": ahora.strftime("%H:%M:%S"),
@@ -114,28 +113,55 @@ def guardar_registro(nombre, punto):
     }
 
     df = cargar_datos()
-    df = pd.concat([df, pd.DataFrame([fila])], ignore_index=True)
+    df = pd.concat([df, pd.DataFrame([nuevo])], ignore_index=True)
     df.to_csv(RUTA_ARCHIVO, index=False, sep=";")
 
     try:
         ws = get_worksheet()
-        ws.append_row(list(fila.values()), value_input_option="USER_ENTERED")
-    except Exception:
+        ws.append_row(list(nuevo.values()), value_input_option="USER_ENTERED")
+    except:
         pass
 
 # ---------------------------------------------------------
-# VISTA REGISTRO (QR FÍSICO BLOQUEADO)
+# MAPA DE PUNTOS
+# ---------------------------------------------------------
+def generar_mapa_puntos(df):
+    img = imagen_planta.copy()
+    draw = ImageDraw.Draw(img, "RGBA")
+
+    df["punto_norm"] = df["punto"].apply(normalizar)
+    color = (0, 150, 255, 220)
+
+    for p in df["punto_norm"].unique():
+        if p in PUNTOS_COORDS:
+            x, y = PUNTOS_COORDS[p]
+            draw.ellipse((x-6, y-6, x+6, y+6), fill=color)
+
+    return img
+
+# ---------------------------------------------------------
+# MAPA DE CALOR
+# ---------------------------------------------------------
+def generar_heatmap(df):
+    img = imagen_planta.copy().convert("RGBA")
+    df["punto_norm"] = df["punto"].apply(normalizar)
+    counts = df["punto_norm"].value_counts()
+
+    for p, n in counts.items():
+        if p in PUNTOS_COORDS:
+            x, y = PUNTOS_COORDS[p]
+            capa = Image.new("RGBA", img.size, (0,0,0,0))
+            draw = ImageDraw.Draw(capa)
+            draw.ellipse((x-40, y-40, x+40, y+40), fill=(255,0,0,120))
+            capa = capa.filter(ImageFilter.GaussianBlur(18))
+            img = Image.alpha_composite(img, capa)
+
+    return img
+
+# ---------------------------------------------------------
+# VISTAS
 # ---------------------------------------------------------
 def vista_registro():
-    # 🔒 BLOQUEO DE REFRESH / REUSO
-    if "registrado" not in st.session_state:
-        st.session_state.registrado = False
-
-    if st.session_state.registrado:
-        st.error("Esta página ya fue utilizada.")
-        st.info("Cierra esta pestaña y vuelve a escanear el QR físico.")
-        st.stop()
-
     punto = st.query_params.get("punto", "SIN_PUNTO")
     if isinstance(punto, list):
         punto = punto[0]
@@ -144,33 +170,48 @@ def vista_registro():
     st.subheader(f"Punto: {punto}")
 
     personas = cargar_personas()
-    nombres = ["-- Selecciona --"] + sorted(personas["nombre"].tolist())
-    sel = st.selectbox("Selecciona tu nombre:", nombres)
+    sel = st.selectbox("Selecciona tu nombre", ["--"] + personas["nombre"].tolist())
 
-    if st.button("Registrar", use_container_width=True):
-        if sel == "-- Selecciona --":
-            st.error("Selecciona un nombre válido.")
-            return
+    if st.button("Registrar"):
+        if sel == "--":
+            st.error("Selecciona un nombre")
+        else:
+            ok, restante = puede_registrar(sel)
+            if not ok:
+                st.warning(f"Espera {restante} minutos para volver a registrar.")
+            else:
+                guardar_registro(sel, punto)
+                st.success("Registro exitoso")
 
-        permitido, restante = puede_registrar(sel)
-        if not permitido:
-            st.warning(f"Espera aproximadamente {restante} minutos.")
-            return
+def vista_panel():
+    st.title("Panel de Control")
 
-        guardar_registro(sel, punto)
+    df = cargar_datos()
+    if df.empty:
+        st.info("Sin registros")
+        return
 
-        # 🔥 MATAR PÁGINA
-        st.session_state.registrado = True
-        st.success("Asistencia registrada correctamente.")
-        st.info("Cierra esta pestaña y vuelve a escanear el QR físico.")
-        st.stop()
+    col1, col2 = st.columns(2)
+    with col1:
+        st.image(generar_mapa_puntos(df), caption="Mapa de puntos")
+    with col2:
+        st.image(generar_heatmap(df), caption="Mapa de calor")
+
+    st.dataframe(df.sort_values("timestamp", ascending=False))
 
 # ---------------------------------------------------------
 # MAIN
 # ---------------------------------------------------------
 def main():
-    st.set_page_config(page_title="Control QR", layout="centered")
-    vista_registro()
+    st.set_page_config(layout="wide")
+    modo = st.query_params.get("modo", "registro")
+    if isinstance(modo, list):
+        modo = modo[0]
+
+    if modo == "panel":
+        vista_panel()
+    else:
+        vista_registro()
 
 if __name__ == "__main__":
     main()
