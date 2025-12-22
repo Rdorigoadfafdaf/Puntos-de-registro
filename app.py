@@ -88,7 +88,7 @@ def cargar_datos():
 # ---------------------------------------------------------
 # BLOQUEO DE REGISTRO POR TIEMPO (NUEVO)
 # ---------------------------------------------------------
-def puede_registrar(nombre, minutos=5):
+def puede_registrar(nombre, minutos=2):
     df = cargar_datos()
     if df.empty:
         return True, None
@@ -321,3 +321,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+
